@@ -28,6 +28,7 @@
 #include <PubSubClient.h>  // MQTT
 #include "SPIFFS.h"
 #include <esp_task_wdt.h>
+#include "config.h"
 
 
 // ===== Funktions-Prototypen =====
@@ -291,7 +292,7 @@ unsigned long lastLuxTime = 0;
 
 float luxRateFiltered = 0;                            // geglättete Lux-Änderung (lx/min)
 const float LUX_RATE_ALPHA = 0.2;                     // Glättung
-const unsigned long LUX_TREND_INTERVAL_MS = 60000UL;  // 60 s
+const unsigned long LUX_TREND_INTERVAL_MS = 30000UL;  // 30 s
 const int CLOSE_FORECAST_MAX_DISTANCE_LX = 300;
 // ===== Trend-Stabilisierung (Schließen) =====
 unsigned long closeBrightTrendSince = 0;
@@ -461,8 +462,6 @@ int logIndex = 0;
 RTC_DS3231 rtc;
 WebServer server(80);
 
-const char* ssid = "Wildsau";
-const char* password = "19690610";
 
 WiFiClient mqttWifi;
 PubSubClient mqttClient(mqttWifi);
@@ -1136,7 +1135,7 @@ void wifiConnectNonBlocking() {
   // Autoreconnect ist auf ESP32 verfügbar
   WiFi.setAutoReconnect(true);
 
-  WiFi.begin(ssid, password);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   addLog("🔌 WLAN: Verbinde ...");
 }
 
@@ -2338,6 +2337,7 @@ if (luxValid) {
 
   lux = luxFiltered;
 }
+lightAutomationAvailable = luxValid && hasVEML && !vemlHardError;
 // ===== Lux Trend Update (alle 30 Sekunden) =====
 if (luxValid && millis() - lastTrendUpdate > 30000) {
 
@@ -2371,15 +2371,16 @@ static int nightLockResetDay = -1;
 
 if (openMode == "light" && closeMode == "light") {
 
-  if (nightLock && now.hour() >= OPEN_WINDOW_START_H) {
-
+  if (nightLock &&
+    now.hour() >= OPEN_WINDOW_START_H &&
+    now.hour() < CLOSE_WINDOW_START_H)
+{
     if (now.day() != nightLockResetDay) {
-      nightLock = false;
-      nightLockResetDay = now.day();
-      addLog("Nacht-Sperre zurückgesetzt");
+        nightLock = false;
+        nightLockResetDay = now.day();
+        addLog("Nacht-Sperre zurückgesetzt");
     }
-
-  }
+}
 
 }
   // Fenster-Flags
@@ -2593,29 +2594,40 @@ if (automatikErlaubt && !learningActive && doorOpen) {
     // (A) Vor-Licht Prognose (nur Komfort, nur über Schwelle)
     // ------------------------------------------------------------
     if (!manualLightActive && lux > closeLightThreshold && lux < closeLightThreshold + CLOSE_FORECAST_MAX_DISTANCE_LX && luxRateFiltered < -MIN_NEG_LUX_RATE) {
-      float minutesToThresh = (lux - closeLightThreshold) / (-luxRateFiltered);
+            float minutesToThresh = 9999.0f;
 
-      if (minutesToThresh > 180 || !isfinite(minutesToThresh)) {
-        scheduledCloseAt = 0;
-      } else {
-        float minutesToStart = minutesToThresh - (float)lampPreClose;
+if (!isfinite(luxRateFiltered) || fabs(luxRateFiltered) < 0.001f) {
+    scheduledCloseAt = 0;
+}
+else {
+    minutesToThresh = (lux - closeLightThreshold) / (-luxRateFiltered);
+}
 
-        if (minutesToStart <= 0.5f) {
-          if (lightState != LIGHT_PRE_CLOSE) {
-            lightState = LIGHT_PRE_CLOSE;
-            startLightForMinutesReset(max(1, lampPreClose));
-            addLogWithLux("Locklicht vor Schließen gestartet (Prognose/sofort)", lux);
-            preCloseStartedAt = millis();
-            closeBrightTrendSince = 0;
-          }
-          scheduledCloseAt = 0;
-        } else {
-          unsigned long delayMs = (unsigned long)(minutesToStart * 60000.0f);
-          scheduledCloseAt = millis() + delayMs;
-        }
-      }
+        if (minutesToThresh <= 0.5f && !preLightCloseDone) {
+
+    if (lightState != LIGHT_PRE_CLOSE) {
+        lightState = LIGHT_PRE_CLOSE;
+        startLightForMinutesReset(max(1, lampPreClose));
+
+        addLogWithLux("Locklicht vor Schließen gestartet (Prognose/sofort)", lux);
+
+        preCloseStartedAt = millis();
+        closeBrightTrendSince = 0;
+
+        preLightCloseDone = true;   // ⭐ wichtig
     }
 
+    scheduledCloseAt = 0;
+} 
+else if (lux > closeLightThreshold + PRECLOSE_ABORT_MARGIN_LX)  {
+  // wieder deutlich heller → Prognose zurücksetzen
+  preLightCloseDone = false;
+}
+else {
+    unsigned long delayMs = (unsigned long)(minutesToThresh * 60000.0f);
+    scheduledCloseAt = millis() + delayMs;
+}
+    }  
     // ------------------------------------------------------------
     // (B) Geplantes Vor-Licht auslösen
     // ------------------------------------------------------------
