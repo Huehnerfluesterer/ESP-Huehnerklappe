@@ -1,3 +1,11 @@
+<p align="center">
+  <img src="docs/images/banner.png" width="900">
+</p>
+
+<h1 align="center">🐔 ESP32 Chicken Coop Door Controller</h1>
+<p align="center">
+Lux-based automation • Sunset prediction • MQTT integration
+</p>
 # 🐔 Smarter Hühnerstall-Tür Controller
 
 [![ESP32](https://img.shields.io/badge/ESP32-Kompatibel-blue)]()
