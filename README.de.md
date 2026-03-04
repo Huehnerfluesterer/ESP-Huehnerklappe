@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.png" width="900">
+  <img src="docs/images/esp-huehnerklappe.png" width="900">
 </p>
 
 <h1 align="center">🐔 ESP32 Chicken Coop Door Controller</h1>
