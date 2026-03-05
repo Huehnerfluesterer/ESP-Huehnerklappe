@@ -28,7 +28,7 @@
 #include <PubSubClient.h>  // MQTT
 #include "SPIFFS.h"
 #include <esp_task_wdt.h>
-#include "config.h"
+#include <config.h>
 
 
 // ===== Funktions-Prototypen =====
