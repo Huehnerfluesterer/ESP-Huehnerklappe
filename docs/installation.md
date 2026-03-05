@@ -95,6 +95,5 @@ You can integrate the controller via MQTT.
 
 See:
 
-```
-docs/mqtt.md
-```
+🇬🇧 [MQTT Guide (English)](mqtt.md)  
+🇩🇪 [MQTT (Deutsch)](mqtt.de.md)
