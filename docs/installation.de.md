@@ -94,6 +94,6 @@ Nach dem Start des Controllers:
 Integration über MQTT möglich.
 
 Siehe:
-
-🇬🇧 [MQTT Guide (English)](docs/mqtt.md)  
-🇩🇪 [MQTT (Deutsch)](docs/mqtt.de.md)
+🇩🇪 
+🇬🇧 [MQTT Guide (English)](mqtt.md)  
+🇩🇪 [MQTT (Deutsch)](mqtt.de.md)
