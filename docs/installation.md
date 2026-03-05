@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide explains how to install and run the **ESP32 Chicken Coop Door Controller**.
+This guide explains how to install the **ESP32 Chicken Coop Door Controller**.
 
 ---
 
@@ -10,10 +10,10 @@ Hardware:
 
 * ESP32 development board
 * VEML7700 lux sensor
-* motor driver
-* door motor
-* limit switches
-* coop light relay
+* Motor driver
+* Door motor
+* Limit switches
+* Relay for coop light
 
 Software:
 
@@ -23,21 +23,21 @@ Software:
 
 ---
 
-# 2. Clone the Repository
+# 2. Clone Repository
 
-Clone the project from GitHub:
+Download the project from GitHub:
 
 ```bash
 git clone https://github.com/Huehnerfluesterer/ESP-Huehnerklappe.git
 ```
 
-Open the folder in **VS Code with PlatformIO**.
+Then open the project in **VS Code with PlatformIO**.
 
 ---
 
 # 3. Create Configuration File
 
-Sensitive data like WiFi credentials are stored in a local config file.
+Credentials such as WiFi are stored in a local configuration file.
 
 Copy the template:
 
@@ -45,13 +45,13 @@ Copy the template:
 cp include/config.example.h include/config.h
 ```
 
-Edit the file and enter your WiFi credentials.
+Then edit the file and insert your credentials.
 
 Example:
 
 ```cpp
-#define WIFI_SSID "your_wifi"
-#define WIFI_PASSWORD "your_password"
+#define WIFI_SSID "MyWiFi"
+#define WIFI_PASSWORD "MyPassword"
 ```
 
 ---
@@ -70,7 +70,7 @@ PlatformIO → Build
 
 # 5. Upload Firmware
 
-Connect your ESP32 via USB and upload the firmware.
+Connect the ESP32 via USB and upload the firmware.
 
 ```
 PlatformIO → Upload
@@ -78,22 +78,47 @@ PlatformIO → Upload
 
 ---
 
-# 6. First Startup
+# 6. First Start
 
-After booting the ESP32:
+After starting the controller:
 
-1. The controller connects to WiFi
-2. MQTT connection is established
-3. The light sensor initializes
-4. Automatic door control starts
+1. ESP32 connects to the configured WiFi network
+2. Sensors and peripherals are initialized
+3. Automatic door control becomes active
 
 ---
 
-# 7. Optional: Home Assistant Integration
+# Alternative: First Setup using Precompiled Firmware
 
-You can integrate the controller via MQTT.
+If you flashed a **precompiled `.bin` firmware**, the WiFi network can be configured via the setup portal.
+
+### Steps
+
+1. Flash the firmware to the ESP32
+2. Power on the device
+3. Connect to the WiFi network:
+
+```
+Huehnerklappe-Setup
+```
+
+4. Open the configuration page in your browser:
+
+```
+http://192.168.4.1
+```
+
+5. Enter your WiFi credentials and save
+
+The controller will reboot and connect to your network.
+
+---
+
+# 7. Optional Home Assistant Integration
+
+Integration via MQTT is possible.
 
 See:
 
-🇬🇧 [MQTT Guide (English)](mqtt.md)  
-🇩🇪 [MQTT (Deutsch)](mqtt.de.md)
+🇬🇧 [MQTT Guide (English)](mqtt.md)
+🇩🇪 [MQTT Guide (Deutsch)](mqtt.de.md)
