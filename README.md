@@ -239,7 +239,14 @@ Typical setup:
 * coop light
 
 ---
+## 📦 Installation
 
+Choose your language:
+
+🇬🇧 [Installation Guide (English)](docs/installation.md)  
+🇩🇪 [Installationsanleitung (Deutsch)](docs/installation.de.md)
+
+---
 # 📷 Hardware Wiring
 
 ![Wiring](docs/images/wiring.png)
