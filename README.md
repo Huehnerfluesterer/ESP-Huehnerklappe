@@ -21,14 +21,14 @@ It is designed for **real-world conditions**, including clouds, storms, snow ref
 
 ---
 
-# 🌍 Languages
+## 🌍 Languages
 
 🇬🇧 English
 🇩🇪 [Deutsch](README.de.md)
 
 ---
 
-# ✨ Key Features
+## ✨ Key Features
 
 ## 🌅 Lux-Based Automation
 
@@ -86,7 +86,7 @@ This prevents premature closing.
 
 ---
 
-# 🔄 Fallback Systems
+## 🔄 Fallback Systems
 
 The controller includes multiple fallback mechanisms.
 
@@ -124,7 +124,7 @@ If the I²C bus locks up, the controller performs:
 
 ---
 
-# 🛑 Safety Features
+## 🛑 Safety Features
 
 ## Door Limit Switches
 
@@ -163,7 +163,7 @@ Ignored events include:
 
 ---
 
-# 📊 Light Processing Pipeline
+## 📊 Light Processing Pipeline
 
 The light measurement pipeline includes:
 
@@ -177,7 +177,7 @@ This ensures **stable behavior in noisy environments**.
 
 ---
 
-# 🌐 Connectivity
+## 🌐 Connectivity
 
 ## MQTT Integration
 
@@ -198,7 +198,7 @@ Compatible with:
 
 ---
 
-# 🖥 Web Interface
+## 🖥 Web Interface
 
 Built-in web interface for:
 
@@ -209,13 +209,13 @@ Built-in web interface for:
 
 ---
 
-# 🔧 OTA Updates
+## 🔧 OTA Updates
 
 Firmware updates can be installed **over the air** without physical access.
 
 ---
 
-# 📜 Event Logging
+## 📜 Event Logging
 
 The system logs:
 
@@ -227,7 +227,7 @@ The system logs:
 
 ---
 
-# 🛠 Hardware
+## 🛠 Hardware
 
 Typical setup:
 
@@ -240,24 +240,33 @@ Typical setup:
 
 ---
 
-# 📷 Hardware Wiring
+## 📦 Installation
+
+Choose your language:
+
+🇬🇧 [Installation Guide (English)](docs/installation.md)  
+🇩🇪 [Installationsanleitung (Deutsch)](docs/installation.de.md)
+
+---
+
+## 📷 Hardware Wiring
 
 ![Wiring](docs/images/wiring.png)
 
 ---
 
-# 🧠 System Architecture
+## 🧠 System Architecture
 
 ![Architecture](docs/images/architecture.png)
 
 ---
 
-# 📜 License
+## 📜 License
 
 MIT License
 
 ---
 
-# 🤝 Contributions
+## 🤝 Contributions
 
 Pull requests and improvements are welcome.

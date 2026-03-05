@@ -27,14 +27,14 @@ Er wurde für **reale Umweltbedingungen** entwickelt, z. B.:
 
 ---
 
-# 🌍 Sprachen
+## 🌍 Sprachen
 
 🇬🇧 [English](README.md)
 🇩🇪 Deutsch
 
 ---
 
-# ✨ Hauptfunktionen
+## ✨ Hauptfunktionen
 
 ## 🌅 Lichtbasierte Automatik
 
@@ -92,7 +92,7 @@ Dadurch werden **Fehltrigger durch Wolken verhindert**.
 
 ---
 
-# 🔄 Fallback-Systeme
+## 🔄 Fallback-Systeme
 
 ## ⏰ Zeitbasierter Fallback
 
@@ -128,7 +128,7 @@ Wenn der I²C-Bus blockiert ist:
 
 ---
 
-# 🛑 Sicherheitsfunktionen
+## 🛑 Sicherheitsfunktionen
 
 ## Endschalter
 
@@ -162,7 +162,7 @@ Kurze Helligkeitsspitzen werden gefiltert, z. B.:
 
 ---
 
-# 🌐 Konnektivität
+## 🌐 Konnektivität
 
 ## MQTT
 
@@ -176,7 +176,7 @@ Integration mit:
 
 ---
 
-# 🖥 Weboberfläche
+## 🖥 Weboberfläche
 
 Integrierte Weboberfläche für:
 
@@ -187,13 +187,13 @@ Integrierte Weboberfläche für:
 
 ---
 
-# 🔧 OTA Updates
+## 🔧 OTA Updates
 
 Firmware kann **over-the-air aktualisiert werden**, ohne physischen Zugriff.
 
 ---
 
-# 📜 Ereignisprotokoll
+## 📜 Ereignisprotokoll
 
 Das System protokolliert:
 
@@ -205,7 +205,16 @@ Das System protokolliert:
 
 ---
 
-# 🛠 Hardware
+## 📦 Installation
+
+Wähle deine Sprache:
+
+🇬🇧 [Installation Guide (English)](docs/installation.md)  
+🇩🇪 [Installationsanleitung (Deutsch)](docs/installation.de.md)
+
+---
+
+## 🛠 Hardware
 
 Typischer Aufbau:
 
@@ -218,6 +227,6 @@ Typischer Aufbau:
 
 ---
 
-# 📜 Lizenz
+## 📜 Lizenz
 
 MIT License
