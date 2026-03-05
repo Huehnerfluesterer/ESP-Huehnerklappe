@@ -95,6 +95,5 @@ Integration über MQTT möglich.
 
 Siehe:
 
-```
-docs/mqtt.md
-```
+🇬🇧 [MQTT Guide (English)](docs/mqtt.md)  
+🇩🇪 [MQTT (Deutsch)](docs/mqtt.de.md)
