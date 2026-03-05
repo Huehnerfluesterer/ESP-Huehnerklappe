@@ -1,27 +1,87 @@
-## ESP32 Chicken Coop Door Controller
+## ESP32 Chicken Coop Door Controller 🐔
 
 Automatische Hühnerstall-Klappensteuerung mit **ESP32**, **Lichtsensor**, **RTC**, **Motorsteuerung**, **Locklicht** und **Webinterface**.
 
-Das System öffnet und schließt die Klappe automatisch anhand der Helligkeit und bietet zusätzliche Funktionen wie Locklicht, Stallbeleuchtung und manuelle Steuerung.
+Das System öffnet und schließt die Stallklappe automatisch abhängig von der Helligkeit.
 
 ---
 
-## Hardware
+## 📷 Systemübersicht
 
-## Mikrocontroller
+```mermaid
+flowchart LR
 
-* ESP32 DevKit V1
+Sun[Sunrise / Sunset]
+LightSensor[VEML7700 Light Sensor]
+ESP[ESP32 Controller]
+MotorDriver[Motor Driver]
+Door[Chicken Coop Door]
 
-Versorgung:
+RTC[RTC DS3231]
+Buttons[Manual Buttons]
+Relays[Relays]
+Lights[LED / Coop Light]
 
-| Pin | Anschluss |
-| --- | --------- |
-| VIN | 5V        |
-| GND | GND       |
+Sun --> LightSensor
+LightSensor --> ESP
+RTC --> ESP
+Buttons --> ESP
+
+ESP --> MotorDriver
+MotorDriver --> Door
+
+ESP --> Relays
+Relays --> Lights
+```
 
 ---
 
-## Pinbelegung
+## 🧠 Funktionsprinzip
+
+```mermaid
+flowchart TD
+
+Lux[Lichtsensor misst Helligkeit]
+Check{Schwellenwert erreicht?}
+
+PreLight[Locklicht vor Öffnung]
+OpenDoor[Motor öffnet Klappe]
+
+PostLight[Locklicht nach Öffnung]
+
+CloseCheck{Dunkelheit erreicht?}
+CloseDoor[Motor schließt Klappe]
+
+Lux --> Check
+
+Check -->|Ja| PreLight
+PreLight --> OpenDoor
+OpenDoor --> PostLight
+
+Lux --> CloseCheck
+CloseCheck -->|Ja| CloseDoor
+```
+
+---
+
+## 🔌 Hardwareübersicht
+
+## Hauptkomponenten
+
+| Bauteil              | Beschreibung      |
+| -------------------- | ----------------- |
+| ESP32 DevKit         | Hauptcontroller   |
+| VEML7700             | Helligkeitssensor |
+| DS3231               | Echtzeituhr       |
+| L298N / Motor Driver | Motorsteuerung    |
+| ACS712               | Stromsensor       |
+| WS2812               | Locklicht         |
+| Relais               | Stallbeleuchtung  |
+| Endschalter          | Türposition       |
+
+---
+
+## ⚡ Pinbelegung
 
 | ESP32 Pin | Funktion                |
 | --------- | ----------------------- |
@@ -37,195 +97,151 @@ Versorgung:
 | GPIO27    | Motor PWM               |
 | GPIO32    | Stalllicht Taster       |
 | GPIO33    | Tür Taster              |
-| GPIO34    | Stromsensor ACS712      |
+| GPIO34    | Stromsensor             |
 
 ---
 
-## Motorsteuerung
+## 🔧 Verdrahtungsdiagramm
 
-Motortreiber Beispiel: **L298N**
+```mermaid
+flowchart LR
 
-| ESP32  | Motortreiber |
-| ------ | ------------ |
-| GPIO25 | IN1          |
-| GPIO26 | IN2          |
-| GPIO27 | ENA          |
+ESP32 --- VEML7700
+ESP32 --- DS3231
+ESP32 --- Buttons
+ESP32 --- MotorDriver
+ESP32 --- Relays
+ESP32 --- WS2812
+ESP32 --- ACS712
 
-Motoranschluss:
+MotorDriver --- Motor
+Motor --- Door
 
-| Motortreiber | Anschluss       |
-| ------------ | --------------- |
-| OUT1         | Motor           |
-| OUT2         | Motor           |
-| 12V          | Motorversorgung |
+Relays --- CoopLight
+WS2812 --- LockLight
+
+Buttons --- ManualControl
+```
 
 ---
 
-## Endschalter
+## 🔌 I²C Bus
 
-Die Endschalter nutzen **INPUT_PULLUP**.
+Der I²C Bus wird von mehreren Komponenten gemeinsam genutzt.
+
+```
+ESP32 GPIO21 (SDA) ───── VEML7700 SDA
+                       └──── DS3231 SDA
+
+ESP32 GPIO22 (SCL) ───── VEML7700 SCL
+                       └──── DS3231 SCL
+```
+
+---
+
+## 🚪 Endschalter
+
+Endschalter arbeiten mit **INPUT_PULLUP**.
 
 Logik:
 
-* LOW = aktiv
-* HIGH = nicht aktiv
+```
+LOW  = Endschalter aktiv
+HIGH = Endschalter nicht aktiv
+```
 
-### Öffnungsschalter
+Verdrahtung:
 
-GPIO14 → Endschalter → GND
-
-### Schließschalter
-
-GPIO12 → Endschalter → GND
-
----
-
-## Tür-Taster
-
-GPIO33 → Taster → GND
+```
+GPIO14 ─── Endschalter offen ─── GND
+GPIO12 ─── Endschalter geschlossen ─── GND
+```
 
 ---
 
-## Stalllicht-Taster
+## 🔘 Taster
 
-GPIO32 → Taster → GND
+Türsteuerung:
 
----
+```
+GPIO33 ─── Taster ─── GND
+```
 
-## Locklicht Relais
+Stalllicht:
 
-GPIO18 → Relais IN
-5V → Relais VCC
-GND → Relais GND
-
-Relaislogik:
-
-LOW = EIN
-HIGH = AUS
+```
+GPIO32 ─── Taster ─── GND
+```
 
 ---
 
-## Stalllicht Relais
+## 💡 Locklicht (WS2812)
 
-GPIO19 → Relais IN
-5V → Relais VCC
-GND → Relais GND
+```
+GPIO4 ─── 330Ω ─── DIN WS2812
+5V ─────────────── VCC
+GND ────────────── GND
+```
 
----
+Empfohlen:
 
-## WS2812 LED
-
-| ESP32 | LED |
-| ----- | --- |
-| GPIO4 | DIN |
-
-Zusätzlich empfohlen:
-
-* 330Ω Widerstand in Datenleitung
+* 330Ω Datenwiderstand
 * 1000µF Kondensator zwischen 5V und GND
 
 ---
 
-## Lichtsensor VEML7700
+## ⚙️ Motorsteuerung
 
-I²C Anschluss:
+Beispiel mit **L298N**
 
-| ESP32  | Sensor |
-| ------ | ------ |
-| GPIO21 | SDA    |
-| GPIO22 | SCL    |
-| 3.3V   | VCC    |
-| GND    | GND    |
+```
+ESP32 GPIO25 → IN1
+ESP32 GPIO26 → IN2
+ESP32 GPIO27 → ENA
 
----
-
-## RTC DS3231
-
-Der RTC nutzt denselben I²C Bus.
-
-| ESP32  | RTC          |
-| ------ | ------------ |
-| GPIO21 | SDA          |
-| GPIO22 | SCL          |
-| VCC    | 3.3V oder 5V |
-| GND    | GND          |
+Motor → OUT1 / OUT2
+12V → Motorversorgung
+```
 
 ---
 
-## Stromsensor ACS712
+## 🔒 Sicherheit
 
-| ESP32  | ACS712 |
-| ------ | ------ |
-| GPIO34 | OUT    |
-| 5V     | VCC    |
-| GND    | GND    |
+Das System enthält mehrere Sicherheitsfunktionen:
 
----
-
-## Software Features
-
-* automatische Türöffnung bei Sonnenaufgang
-* automatisches Schließen bei Dunkelheit
-* Locklicht vor Öffnung
-* Locklicht nach Öffnung
-* Stallbeleuchtung steuerbar
-* Webinterface
-* Stromüberwachung des Motors
-* Endschalter-Sicherheit
-* manuelle Steuerung
+* Endschalter stoppen den Motor
+* Stromsensor erkennt Blockierungen
+* Zeitlimit verhindert Dauerlauf
+* Manuelle Steuerung jederzeit möglich
 
 ---
 
-## Logik
+## 🌐 Webinterface
 
-### Öffnen
-
-1. Lichtsensor erkennt steigende Helligkeit
-2. optional Locklicht vor Öffnung
-3. Motor öffnet Klappe
-4. Locklicht nach Öffnung
-
-### Schließen
-
-1. Helligkeit fällt unter Schwelle
-2. Motor schließt Klappe
-3. Endschalter stoppt Motor
-
----
-
-## Sicherheit
-
-* Endschalter verhindern Überfahren
-* Stromsensor erkennt Blockierung
-* Zeitlimits stoppen Motor bei Fehler
-
----
-
-## Webinterface
-
-Über das Webinterface können folgende Einstellungen angepasst werden:
+Über das Webinterface können eingestellt werden:
 
 * Öffnungsschwelle
 * Schließschwelle
 * Locklichtdauer
 * Stalllicht
-* manuelles Öffnen und Schließen
+* manuelle Türsteuerung
 
 ---
 
-## Benötigte Bibliotheken
+## 📦 Projektstruktur
 
-Arduino Libraries:
+Empfohlene GitHub Struktur:
 
-* WiFi
-* WebServer
-* Wire
-* Adafruit VEML7700
-* RTClib
-* FastLED
+```
+/firmware
+/docs
+/images
+/hardware
+README.md
+```
 
 ---
 
-## Lizenz
+## 📜 Lizenz
 
 MIT License
