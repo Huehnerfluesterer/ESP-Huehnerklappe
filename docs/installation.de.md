@@ -9,7 +9,7 @@ Diese Anleitung erklärt die Installation des **ESP32 Hühnerklappen Controllers
 Hardware:
 
 * ESP32 Entwicklungsboard
-* VEML7700 Lux Sensor
+* VEML7700 Lux-Sensor
 * Motortreiber
 * Türmotor
 * Endschalter
@@ -82,18 +82,43 @@ PlatformIO → Upload
 
 Nach dem Start des Controllers:
 
-1. ESP32 verbindet sich mit WLAN
-2. MQTT Verbindung wird aufgebaut
-3. Lux Sensor wird initialisiert
-4. Automatische Türsteuerung startet
+1. Der ESP32 verbindet sich mit dem konfigurierten WLAN
+2. Sensoren und Peripherie werden initialisiert
+3. Die automatische Türsteuerung wird aktiviert
+
+---
+
+# Alternative: Ersteinrichtung mit vorgefertigter Firmware (.bin)
+
+Wenn eine **vorkompilierte `.bin` Firmware** geflasht wurde, kann das WLAN über das Setup-Portal eingerichtet werden.
+
+### Schritte
+
+1. Firmware auf den ESP32 flashen
+2. Gerät einschalten
+3. Mit folgendem WLAN verbinden:
+
+```
+Huehnerklappe-Setup
+```
+
+4. Konfigurationsseite im Browser öffnen:
+
+```
+http://192.168.4.1
+```
+
+5. WLAN-Daten eingeben und speichern
+
+Der Controller startet anschließend neu und verbindet sich automatisch mit dem Netzwerk.
 
 ---
 
 # 7. Optionale Home Assistant Integration
 
-Integration über MQTT möglich.
+Eine Integration über MQTT ist möglich.
 
 Siehe:
 
-🇬🇧 [MQTT Guide (English)](mqtt.md)  
-🇩🇪 [MQTT (Deutsch)](mqtt.de.md)
+🇬🇧 [MQTT Guide (English)](mqtt.md)
+🇩🇪 [MQTT Anleitung (Deutsch)](mqtt.de.md)
