@@ -23,12 +23,6 @@ Der Controller verwendet einen **VEML7700 Lux-Sensor** mit Medianfilter, exponen
 
 ---
 
-## 🌍 Sprachen
-
-🇩🇪 Deutsch &nbsp;|&nbsp; 🇬🇧 [English](README.en.md)
-
----
-
 ## ✨ Funktionen
 
 | Funktion | Beschreibung |
