@@ -20,6 +20,7 @@ void handleSaveClose();
 
 // Erweitert
 void handleAdvanced();
+void handleBlockade();
 void handleFw();
 void handleSelftest();
 

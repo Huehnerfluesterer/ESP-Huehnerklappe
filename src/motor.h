@@ -9,7 +9,6 @@
 extern MotorState    motorState;
 extern unsigned long motorUntil;
 extern String        motorReason;
-extern int           MOTOR_CH;   // LEDC-Kanal (-1 = nicht zugewiesen)
 
 // Motorpositionen (Laufzeit in ms, aus EEPROM geladen)
 extern long openPosition;
@@ -41,5 +40,13 @@ void reverseAfterBlockade();
 // Gibt true zurück wenn Aktion manuell ausgelöst wurde (Taster/Web/MQTT)
 bool isManualAction();
 
-// Zyklischer Update: Endschalter + Timeout überwachen
+// Zyklischer Update: Endschalter + Timeout + Blockadeerkennung
 void updateMotor();
+
+// ACS712 Blockadeerkennung
+extern float         currentBaseline;
+extern bool          currentCalibrated;
+extern unsigned long motorStartedAt;
+extern bool          blockadeEnabled;
+extern float         blockadeThresholdA;
+extern float         peakCurrentA;

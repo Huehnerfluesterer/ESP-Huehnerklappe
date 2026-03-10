@@ -7,6 +7,7 @@
 #include "../system.h"
 #include "../logger.h"
 #include "../mqtt.h"
+#include "../pins.h"
 #include <WiFi.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -33,6 +34,7 @@ void handleAdvanced()
     <button onclick="location.href='/systemtest'" class="btn-open">🧪 Systemtest</button>
     <button onclick="location.href='/mqtt'"        class="btn-open">📡 MQTT Einstellungen</button>
     <button onclick="location.href='/calibration'" class="btn-open">🎯 Kalibrierung</button>
+    <button onclick="location.href='/blockade'"    class="btn-open">⚡ Blockadeerkennung</button>
     <button onclick="location.href='/log'"         class="btn-open">📜 Logbuch</button>
     <button onclick="location.href='/fw'"          class="btn-open">⬆️ Firmware Update</button>
     <button onclick="toggleTheme()"                class="btn-open">🌙 Dark/Light Mode</button>
@@ -57,6 +59,174 @@ function rebootESP(){ if(!confirm("ESP wirklich neu starten?")) return; fetch("/
     html.replace("%FW_VERSION%", FW_VERSION);
     html.replace("%RSSI%",       String(WiFi.RSSI()));
     html.replace("%FREE_HEAP%",  String(ESP.getFreeHeap() / 1024));
+    server.send(200, "text/html; charset=UTF-8", html);
+}
+
+// ==================================================
+// BLOCKADEERKENNUNG
+// ==================================================
+void handleBlockade()
+{
+    // Aktuellen Strom live messen (nur wenn Motor steht – Leerlaufwert zeigen)
+    float liveCurrent = 0.0f;
+    if (motorState == MOTOR_STOPPED)
+    {
+        const int S = 20; long sum = 0;
+        for (int i = 0; i < S; i++) { sum += analogRead(ACS712_PIN); delay(1); }
+        float vMeas   = (sum / S) * (3.3f / 4095.0f);
+        float vSensor = vMeas / (20.0f / 30.0f);
+        liveCurrent   = fabsf((vSensor - ACS712_ZERO_V) / (ACS712_MV_PER_A / 1000.0f));
+    }
+
+    String html = renderThemeHead("Blockadeerkennung");
+    html += R"rawliteral(
+<div class="header" style="position:relative;">
+  <h3>⚡ Blockadeerkennung</h3>
+  <button onclick="toggleHelp()" style="position:absolute;top:22px;right:16px;width:32px;height:32px;border-radius:50%;background:var(--bg);color:var(--muted);font-size:16px;font-weight:700;padding:0;border:1px solid var(--border);">?</button>
+</div>
+
+<!-- HILFE MODAL -->
+<div id="helpOverlay" onclick="toggleHelp()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;padding:20px;box-sizing:border-box;overflow-y:auto;">
+  <div onclick="event.stopPropagation()" style="background:var(--card);border-radius:20px;padding:22px;max-width:400px;margin:auto;margin-top:40px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <span style="font-weight:700;font-size:17px;">⚡ Was ist Blockadeerkennung?</span>
+      <button onclick="toggleHelp()" style="width:28px;height:28px;border-radius:50%;background:var(--bg);color:var(--muted);font-size:14px;padding:0;border:none;">✕</button>
+    </div>
+
+    <p style="font-size:14px;line-height:1.6;color:var(--text);">
+      Der Motor der Klappe zieht normalerweise nur wenig Strom wenn er frei läuft.
+      Klemmt etwas – zum Beispiel ein Huhn oder ein Ast – steigt der Strom stark an.
+      Die Blockadeerkennung misst das und stoppt den Motor bevor etwas kaputtgeht.
+    </p>
+
+    <div style="background:var(--bg);border-radius:14px;padding:14px;margin:14px 0;font-size:14px;line-height:1.8;">
+      <div><span style="color:var(--muted);">🔋 Baseline</span><br>
+      Normaler Strom beim freien Lauf – wird automatisch beim Motorstart gemessen.</div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;">
+      <div><span style="color:var(--muted);">📈 Höchster Strom</span><br>
+      Der höchste gemessene Wert seit dem letzten Reset – nützlich zur Einstellung.</div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;">
+      <div><span style="color:var(--muted);">⚙️ Einstellung</span><br>
+      Wie viel mehr Strom als normal erlaubt ist bevor der Motor stoppt.</div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;">
+      <div><span style="color:var(--muted);">🚨 Aktiver Schwellwert</span><br>
+      Baseline + Einstellung = Auslösepunkt. Wird dieser Wert überschritten stoppt der Motor sofort.</div>
+    </div>
+
+    <div style="background:rgba(34,197,94,0.1);border-radius:14px;padding:14px;font-size:14px;line-height:1.6;">
+      <strong>💡 So richtest du es ein:</strong><br>
+      1. Motor einmal normal laufen lassen<br>
+      2. <em>Höchster Strom</em> ablesen → das ist dein Normalwert<br>
+      3. Klappe kurz von Hand blockieren<br>
+      4. <em>Höchster Strom</em> ablesen → das ist der Blockade-Wert<br>
+      5. Einstellung = Mitte zwischen beiden Werten<br><br>
+      <strong>Beispiel:</strong> Normal 0.8 A, Blockade 3.5 A<br>
+      → Einstellung: (3.5 − 0.8) ÷ 2 = <strong>1.4 A</strong><br>
+      → Auslösung bei: 0.8 + 1.4 = <strong>2.2 A</strong>
+    </div>
+
+    <button onclick="toggleHelp()" style="margin-top:16px;width:100%;padding:12px;border:none;border-radius:12px;font-size:15px;font-weight:600;background:var(--green);color:white;cursor:pointer;">
+      Verstanden ✓
+    </button>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="card">
+    <div class="card-title">Live-Messung (Motor gestoppt)</div>
+    <div class="status-row">
+      <span class="label">Aktueller Strom</span>
+      <span id="live">%LIVE_A% A</span>
+    </div>
+    <div class="status-row">
+      <span class="label">Eingemessene Baseline</span>
+      <span>%BASELINE_A% A</span>
+    </div>
+    <div class="status-row">
+      <span class="label">Höchster gemessener Strom</span>
+      <span id="peak" style="font-weight:600;color:var(--red);">%PEAK_A% A</span>
+    </div>
+    <div class="status-row">
+      <span class="label">Aktiver Schwellwert</span>
+      <span>%TRIGGER_A% A <span style="color:var(--muted);font-size:12px;">(Baseline + Einstellung)</span></span>
+    </div>
+    <button onclick="resetPeak()" class="btn-reset" style="margin-top:8px;">↺ Peak zurücksetzen</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Einstellungen</div>
+    <form id="frm">
+      <div class="row-toggle">
+        <span>Blockadeerkennung aktiv</span>
+        <label class="toggle"><input type="checkbox" id="en" name="enabled" %CHECKED%><span class="slider"></span></label>
+      </div>
+      <div class="field-row" style="margin-top:16px;">
+        <label>Schwellwert über Baseline (A)</label>
+        <input type="number" id="thr" name="threshold" value="%THRESHOLD%" min="0.5" max="10" step="0.1" style="width:80px;text-align:right;">
+      </div>
+      <div style="color:var(--muted);font-size:12px;margin-top:6px;">
+        Empfehlung: Leerlaufstrom × 4 bis 5.<br>
+        Bei zu vielen Fehlauslösungen erhöhen, bei träger Reaktion verringern.
+      </div>
+      <button type="button" onclick="save()" class="btn-open" style="margin-top:16px;">💾 Speichern</button>
+    </form>
+    <div id="msg" style="margin-top:10px;font-size:14px;color:var(--green);display:none;">✅ Gespeichert</div>
+  </div>
+
+</div>
+<style>
+.status-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:15px;}
+.label{color:var(--muted);}
+.row-toggle{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+.field-row{display:flex;justify-content:space-between;align-items:center;}
+.field-row label{color:var(--muted);font-size:14px;}
+.field-row input{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:15px;}
+.toggle{position:relative;display:inline-block;width:44px;height:24px;}
+.toggle input{opacity:0;width:0;height:0;}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--muted);border-radius:24px;transition:.3s;}
+.slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.3s;}
+input:checked+.slider{background:var(--green);}
+input:checked+.slider:before{transform:translateX(20px);}
+.btn-open{width:100%;padding:12px;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;background:var(--green);color:white;}
+.btn-reset{width:100%;padding:10px;border:none;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;background:var(--bg);color:var(--muted);border:1px solid var(--border);}
+</style>
+<script>
+function toggleHelp(){
+  const o=document.getElementById("helpOverlay");
+  o.style.display = o.style.display==="none" ? "block" : "none";
+}
+function save(){
+  const body=new URLSearchParams();
+  body.append("enabled", document.getElementById("en").checked?"1":"0");
+  body.append("threshold", document.getElementById("thr").value);
+  fetch("/save-blockade",{method:"POST",body})
+    .then(r=>{if(r.ok){const m=document.getElementById("msg");m.style.display="block";setTimeout(()=>m.style.display="none",2000);}});
+}
+function refreshLive(){
+  fetch("/blockade-live").then(r=>r.text()).then(t=>{
+    document.getElementById("live").textContent=t+" A";
+  });
+  fetch("/blockade-peak").then(r=>r.text()).then(t=>{
+    document.getElementById("peak").textContent=t+" A";
+  });
+}
+function resetPeak(){
+  fetch("/blockade-peak-reset",{method:"POST"}).then(()=>{
+    document.getElementById("peak").textContent="0.00 A";
+  });
+}
+setInterval(refreshLive, 1000);
+refreshLive();
+</script>
+)rawliteral";
+    html += renderFooter();
+    html.replace("%LIVE_A%",     String(liveCurrent,  2));
+    html.replace("%BASELINE_A%", String(currentBaseline, 2));
+    html.replace("%PEAK_A%",     String(peakCurrentA, 2));
+    html.replace("%TRIGGER_A%",  String(currentBaseline + blockadeThresholdA, 2));
+    html.replace("%CHECKED%",    blockadeEnabled ? "checked" : "");
+    html.replace("%THRESHOLD%",  String(blockadeThresholdA, 1));
     server.send(200, "text/html; charset=UTF-8", html);
 }
 
@@ -224,7 +394,7 @@ function togglePass(){const p=document.getElementById("mqttPass");p.type=(p.type
     html += renderFooter();
     bool connected = mqttSettings.enabled && mqttClientConnected();
     html.replace("%HOST%",             mqttSettings.host);
-    html.replace("%PORT%",             String(mqttSettings.port));
+    html.replace("%PORT%",             String(mqttSettings.port == 0 || mqttSettings.port == 65535 ? 1883 : mqttSettings.port));
     html.replace("%USER%",             mqttSettings.user);
     html.replace("%PASS%",             mqttSettings.pass);
     html.replace("%CLIENTID%",         mqttSettings.clientId);

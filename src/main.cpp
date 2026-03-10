@@ -1,7 +1,8 @@
 // ==========================
 // FIRMWARE VERSION
 // ==========================
-const char *FW_VERSION = "2.0.15"; // Umbau auf MosFet anstatt WS2812 – keine RGB-Status-LED mehr, daher neue Version 2.0
+const char *FW_VERSION = "1.0.15";
+
 // ==========================
 // INCLUDES
 // ==========================
@@ -45,10 +46,7 @@ static unsigned long lastTrendUpdate = 0;
 static float         luxFiltered   = 0.0f;
 static bool          luxInitDone   = false;
 
-// ACS712 (Strom-Kalibrierung)
-float currentBaseline   = 0.0f;
-float currentThreshold  = 0.0f;
-bool  currentCalibrated = false;
+// ACS712 – Variablen und Logik in motor.cpp
 
 int stallLightMinutes = 1;   // in light.cpp referenziert
 
@@ -71,6 +69,7 @@ void setup()
     loadMotorPositions();
     loadTheme();
     loadLimitSwitchSetting();
+    loadBlockadeSettings();
 
     // ===== GPIO =====
     pinMode(MOTOR_IN1,          OUTPUT); digitalWrite(MOTOR_IN1, LOW);
@@ -129,6 +128,47 @@ void setup()
     server.on("/save-open",  HTTP_POST, handleSaveOpen);
     server.on("/save-close", HTTP_POST, handleSaveClose);
     server.on("/advanced",   HTTP_GET,  handleAdvanced);
+    server.on("/blockade",   HTTP_GET,  handleBlockade);
+    server.on("/save-blockade", HTTP_POST, []() {
+        if (otaInProgress || ioSafeState) { server.send(503, "text/plain", "OTA aktiv"); return; }
+        blockadeEnabled    = server.arg("enabled")   == "1";
+        blockadeThresholdA = server.arg("threshold").toFloat();
+        if (blockadeThresholdA < 0.5f || blockadeThresholdA > 10.0f) blockadeThresholdA = 2.0f;
+        saveBlockadeSettings();
+        addLog(String("Blockade: ") + (blockadeEnabled ? "aktiv" : "deaktiviert") +
+               ", Schwelle=" + String(blockadeThresholdA, 1) + "A");
+        server.send(200, "text/plain", "OK");
+    });
+    server.on("/blockade-live", HTTP_GET, []() {
+        // 100 Samples für stabilen Mittelwert (ESP32 ADC rauscht stark)
+        const int S = 100; long sum = 0;
+        for (int i = 0; i < S; i++) sum += analogRead(ACS712_PIN);
+        float vMeas   = (sum / S) * (3.3f / 4095.0f);
+#if ACS712_HAS_DIVIDER
+        float vSensor = vMeas / (20.0f / 30.0f);
+#else
+        float vSensor = vMeas;
+#endif
+        float amps    = fabsf((vSensor - ACS712_ZERO_V) / (ACS712_MV_PER_A / 1000.0f));
+        // Gleitender Mittelwert → Display ruhig halten
+        static float filtered = 0.0f;
+        static bool  firstRun = true;
+        if (firstRun) { filtered = amps; firstRun = false; }
+        else          { filtered = filtered * 0.6f + amps * 0.4f; }
+        // Sensor-Warnung NUR im Stillstand – beim laufenden Motor immer Rohwert zeigen
+        if (filtered > 8.0f && motorState == MOTOR_STOPPED) {
+            server.send(200, "text/plain", "-- (kein Sensor?)");
+            return;
+        }
+        server.send(200, "text/plain", String(filtered, 2));
+    });
+    server.on("/blockade-peak", HTTP_GET, []() {
+        server.send(200, "text/plain", String(peakCurrentA, 2));
+    });
+    server.on("/blockade-peak-reset", HTTP_POST, []() {
+        peakCurrentA = 0.0f;
+        server.send(200, "text/plain", "OK");
+    });
     server.on("/fw",         HTTP_GET,  handleFw);
     server.on("/systemtest", HTTP_GET,  handleSelftest);
     server.on("/mqtt",       HTTP_GET,  handleMqtt);

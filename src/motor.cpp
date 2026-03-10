@@ -13,11 +13,52 @@
 MotorState    motorState   = MOTOR_STOPPED;
 unsigned long motorUntil   = 0;
 String        motorReason  = "";
-int           MOTOR_CH     = -1;
 
 bool         actionLock     = false;
 unsigned long limitOpenSince  = 0;
 unsigned long limitCloseSince = 0;
+
+// --- ACS712 Blockadeerkennung ---
+float         currentBaseline    = 0.0f;  // Leerlauf-Strom beim Motorstart (A)
+bool          currentCalibrated  = false; // Baseline eingemessen?
+unsigned long motorStartedAt     = 0;     // Zeitpunkt Motorstart für Settle-Zeit
+bool          blockadeEnabled    = true;  // wird aus EEPROM geladen
+float         blockadeThresholdA = BLOCKADE_THRESHOLD_A; // wird aus EEPROM geladen
+float         peakCurrentA       = 0.0f;  // höchster gemessener Strom seit letztem Reset
+
+// Spannungsteiler-Korrektur: 10kΩ/20kΩ → Faktor 20/(10+20) = 0.6667
+// ADC-Bereich 0–4095 entspricht 0–3.3V
+// Rückrechnung auf Sensor-Ausgangsspannung: Vmeas / 0.6667
+// Strom = (Vsensor - ACS712_ZERO_V) / (ACS712_MV_PER_A / 1000.0)
+static float measureCurrentAmps()
+{
+    // ESP32 ADC ist rauschbehaftet → 100 Samples mitteln
+    const int SAMPLES = 100;
+    long sum = 0;
+    for (int i = 0; i < SAMPLES; i++) sum += analogRead(ACS712_PIN);
+    float adcAvg  = (float)sum / SAMPLES;
+    float vMeas   = adcAvg * (3.3f / 4095.0f);
+    // Spannungsteiler-Korrektur nur wenn verbaut (ACS712_HAS_DIVIDER = 1)
+#if ACS712_HAS_DIVIDER
+    float vSensor = vMeas / (20.0f / 30.0f);  // 10k/20k Teiler zurückrechnen
+#else
+    float vSensor = vMeas;                     // kein Teiler: direkt messen
+#endif
+    float amps    = fabsf((vSensor - ACS712_ZERO_V) / (ACS712_MV_PER_A / 1000.0f));
+    if (amps > 8.0f) return 0.0f;  // Pin floatet / kein Sensor
+    return amps;
+}
+
+static void calibrateBaseline()
+{
+    // 5 schnelle Messungen ohne delay()
+    float sum = 0.0f;
+    for (int i = 0; i < 5; i++) sum += measureCurrentAmps();
+    currentBaseline   = sum / 5.0f;
+    currentCalibrated = true;
+    Serial.printf("⚡ ACS712 Baseline: %.2f A  (Blockade ab %.2f A)\n",
+                  currentBaseline, currentBaseline + blockadeThresholdA);
+}
 
 const unsigned long LIMIT_DEBOUNCE_MS = 40;
 
@@ -48,11 +89,8 @@ void motorInit()
     digitalWrite(MOTOR_IN1, LOW);
     digitalWrite(MOTOR_IN2, LOW);
 
-    MOTOR_CH = ledcAttach(MOTOR_ENA, 2000, 8); // 2 kHz, 8 Bit
-    if (MOTOR_CH < 0)
-        Serial.println("❌ LEDC: Kein Kanal verfügbar");
-    else
-        Serial.printf("✅ LEDC Kanal %d zugewiesen\n", MOTOR_CH);
+    ledcAttach(MOTOR_ENA, 2000, 8); // 2 kHz, 8 Bit – Pin-basiert (Core 3.x)
+    Serial.println("✅ LEDC Motor-PWM initialisiert (GPIO " + String(MOTOR_ENA) + ")");
 }
 
 // ==================================================
@@ -62,35 +100,41 @@ void motorStop()
 {
     digitalWrite(MOTOR_IN1, LOW);
     digitalWrite(MOTOR_IN2, LOW);
-    if (MOTOR_CH >= 0) ledcWrite(MOTOR_CH, 0);
+    ledcWrite(MOTOR_ENA, 0);
 }
 
 void motorOpen()
 {
     digitalWrite(MOTOR_IN1, HIGH);
     digitalWrite(MOTOR_IN2, LOW);
-    if (MOTOR_CH >= 0) ledcWrite(MOTOR_CH, 180);
+    ledcWrite(MOTOR_ENA, 180);
 }
 
 void motorClose()
 {
     digitalWrite(MOTOR_IN1, LOW);
     digitalWrite(MOTOR_IN2, HIGH);
-    if (MOTOR_CH >= 0) ledcWrite(MOTOR_CH, 180);
+    ledcWrite(MOTOR_ENA, 180);
 }
 
 void startMotorOpen(unsigned long durationMs)
 {
     motorOpen();
-    motorState = MOTOR_OPENING;
-    motorUntil = millis() + durationMs;
+    motorState        = MOTOR_OPENING;
+    motorUntil        = millis() + durationMs;
+    // Blockadeerkennung: Kalibrierung nach Anlaufzeit
+    currentCalibrated = false;
+    motorStartedAt    = millis();
 }
 
 void startMotorClose(unsigned long durationMs)
 {
     motorClose();
-    motorState = MOTOR_CLOSING;
-    motorUntil = millis() + durationMs;
+    motorState        = MOTOR_CLOSING;
+    motorUntil        = millis() + durationMs;
+    // Blockadeerkennung: Kalibrierung nach Anlaufzeit
+    currentCalibrated = false;
+    motorStartedAt    = millis();
 }
 
 // ==================================================
@@ -117,6 +161,43 @@ void reverseAfterBlockade()
 void updateMotor()
 {
     if (motorState == MOTOR_STOPPED) return;
+
+    // ===== STROMMESSUNG (immer, unabhängig von Blockadeerkennung) =====
+    // Peak-Tracking läuft immer mit sobald Motor läuft
+    static unsigned long lastCurrentCheck = 0;
+    if (millis() - motorStartedAt > 200UL && millis() - lastCurrentCheck > 200UL)
+    {
+        lastCurrentCheck = millis();
+        float ampsNow = measureCurrentAmps();
+        if (ampsNow > peakCurrentA) peakCurrentA = ampsNow;
+    }
+
+    // ===== BLOCKADEERKENNUNG (ACS712) =====
+    // Nach 500ms Anlaufzeit: Baseline einmessen; danach alle 200ms prüfen
+    static unsigned long lastBlockadeCheck = 0;
+    if (blockadeEnabled && millis() - motorStartedAt > 500UL)
+    {
+        if (!currentCalibrated)
+        {
+            calibrateBaseline();
+        }
+        else if (millis() - lastBlockadeCheck > 200UL)
+        {
+            lastBlockadeCheck = millis();
+            float amps = measureCurrentAmps();
+            if (!isnan(blockadeThresholdA) && amps > currentBaseline + blockadeThresholdA)
+            {
+                Serial.printf("🚨 Blockade! %.2f A (Baseline %.2f A)\n",
+                              amps, currentBaseline);
+                addLog(String("Blockade erkannt (") + String(amps, 1) + "A)");
+                motorStop();
+                motorState        = MOTOR_STOPPED;
+                currentCalibrated = false;
+                reverseAfterBlockade();
+                return;
+            }
+        }
+    }
 
     // ===== ENDSCHALTER ÖFFNEN =====
     if (useLimitSwitches && motorState == MOTOR_OPENING)

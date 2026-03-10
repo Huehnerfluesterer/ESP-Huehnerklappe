@@ -10,6 +10,7 @@
 #define EEPROM_ADDR_MQTT        200    // MqttSettings-Struct
 #define EEPROM_ADDR_DOORSTATE   400    // bool doorOpen
 #define EEPROM_ADDR_THEME       450    // char[10] theme
+#define EEPROM_ADDR_BLOCKADE    460    // bool blockadeEnabled (1) + float blockadeThresholdA (4)
 
 // Zugriff auf Settings (in storage.cpp definiert)
 extern Settings     settings;
@@ -55,6 +56,9 @@ void loadDoorState();
 // Theme
 void saveTheme(const String &theme);
 void loadTheme();
+
+void saveBlockadeSettings();
+void loadBlockadeSettings();
 
 // Motor-Kalibrierung
 void saveMotorPositions();

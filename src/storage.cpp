@@ -1,5 +1,6 @@
 #include "storage.h"
 #include "door.h"    // doorOpen, doorPhase
+#include "motor.h"   // blockadeEnabled, blockadeThresholdA
 #include "types.h"
 #include <EEPROM.h>
 #include <Arduino.h>
@@ -98,17 +99,26 @@ void loadMqttSettings()
 {
     EEPROM.get(EEPROM_ADDR_MQTT, mqttSettings);
 
-    if (strlen(mqttSettings.host) == 0 || strcmp(mqttSettings.host, "0.0.0.0") == 0)
+    // Prüfen ob host druckbare ASCII-Zeichen enthält (kein Garbage)
+    bool hostValid = true;
+    for (int i = 0; i < (int)sizeof(mqttSettings.host); i++) {
+        char c = mqttSettings.host[i];
+        if (c == '\0') break;                        // Stringende → OK
+        if (c < 32 || c > 126) { hostValid = false; break; }  // Kein druckbares ASCII → Garbage
+    }
+
+    if (!hostValid || strcmp(mqttSettings.host, "0.0.0.0") == 0)
     {
+        memset(&mqttSettings, 0, sizeof(mqttSettings));
         mqttSettings.enabled = false;
-        strcpy(mqttSettings.host,     "");       // leer → mqttLoop greift nie
-        mqttSettings.port = 1883;
-        strcpy(mqttSettings.user,     "");
-        strcpy(mqttSettings.pass,     "");
-        strcpy(mqttSettings.clientId, "");       // leer bis Benutzer konfiguriert
-        strcpy(mqttSettings.base,     "Chickendoor");
+        mqttSettings.port    = 1883;
+        // alle Strings bleiben leer (\0 durch memset)
         saveMqttSettings();
     }
+
+    // Port-Sanity (65535 = uninitialisiert)
+    if (mqttSettings.port == 0 || mqttSettings.port == 65535)
+        mqttSettings.port = 1883;
 }
 
 // ==================================================
@@ -174,4 +184,22 @@ void loadLimitSwitchSetting()
     EEPROM.get(EEPROM_ADDR_LIMIT_SW, useLimitSwitches);
     if (useLimitSwitches != true && useLimitSwitches != false)
         useLimitSwitches = true;
+}
+
+void saveBlockadeSettings()
+{
+    EEPROM.put(EEPROM_ADDR_BLOCKADE,     blockadeEnabled);
+    EEPROM.put(EEPROM_ADDR_BLOCKADE + 1, blockadeThresholdA);
+    EEPROM.commit();
+}
+
+void loadBlockadeSettings()
+{
+    EEPROM.get(EEPROM_ADDR_BLOCKADE,     blockadeEnabled);
+    EEPROM.get(EEPROM_ADDR_BLOCKADE + 1, blockadeThresholdA);
+    // Sanitize
+    if (blockadeEnabled != true && blockadeEnabled != false)
+        blockadeEnabled = true;
+    if (isnan(blockadeThresholdA) || blockadeThresholdA < 0.5f || blockadeThresholdA > 10.0f)
+        blockadeThresholdA = 2.0f;
 }

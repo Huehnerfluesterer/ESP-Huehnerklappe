@@ -19,8 +19,20 @@
 #define RED_BUTTON_PIN  35   // Taster Rotlicht (INPUT_PULLUP, input-only GPIO)
 
 // Sensoren
-#define LDR_PIN         35   // LDR analog (nicht aktiv genutzt)
-#define ACS712_PIN      34   // Stromsensor analog
+#define LDR_PIN         35   // LDR analog – NICHT verwenden! GPIO 35 = RED_BUTTON_PIN
+// ACS712 Stromsensor (GPIO 34, input-only)
+// VCC = 5V → Nullpunkt = 2.5V; Spannungsteiler 10kΩ/20kΩ nötig (max 3.3V am ADC)
+// Variante wählen: 5A → 185  |  20A → 100  |  30A → 66
+#define ACS712_PIN          34
+#define ACS712_MV_PER_A     185     // 5A-Variante (bei 20A-Modul auf 100 ändern)
+#define ACS712_VCC          5.0f    // Versorgungsspannung des Sensors
+#define ACS712_ZERO_V       2.5f    // Ausgangsspannung bei 0A (= VCC/2)
+#define BLOCKADE_THRESHOLD_A  2.0f  // Schwellwert über Baseline (Ampere) → Blockade
+
+// Spannungsteiler vor GPIO 34?
+// 0 = noch kein Teiler verbaut (direkt angeschlossen, ADC wird bei >3.3V geclippt)
+// 1 = Teiler verbaut: 10kΩ nach VCC, 20kΩ nach GND → Faktor 20/30
+#define ACS712_HAS_DIVIDER  0
 
 // I2C (VEML7700 + RTC DS3231)
 #define I2C_SDA         21
