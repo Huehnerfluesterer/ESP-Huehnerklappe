@@ -1,7 +1,8 @@
 // ==========================
 // FIRMWARE VERSION
 // ==========================
-const char *FW_VERSION = "2.0.15"; // Umbau auf MosFet anstatt WS2812 – keine RGB-Status-LED mehr, daher neue Version 2.0
+const char *FW_VERSION = "1.0.15";
+
 // ==========================
 // INCLUDES
 // ==========================
@@ -13,23 +14,23 @@ const char *FW_VERSION = "2.0.15"; // Umbau auf MosFet anstatt WS2812 – keine 
 #include <EEPROM.h>
 #include <Update.h>
 #include <ArduinoJson.h>
-// esp_task_wdt nicht manuell verwenden – Arduino-Framework übernimmt das
+#include <esp_task_wdt.h>
 #include <PubSubClient.h>
 
-#include "pins.h"
-#include "types.h"
-#include "storage.h"
-#include "system.h"
-#include "logger.h"
-#include "lux.h"
-#include "light.h"
-#include "motor.h"
-#include "door.h"
-#include "logic.h"
-#include "mqtt.h"
-#include "wlan.h"
-#include "web/web.h"
-#include "icons.h"       // icon192_png / icon512_png PROGMEM-Arrays
+#include "src/pins.h"
+#include "src/types.h"
+#include "src/storage.h"
+#include "src/system.h"
+#include "src/logger.h"
+#include "src/lux.h"
+#include "src/light.h"
+#include "src/motor.h"
+#include "src/door.h"
+#include "src/logic.h"
+#include "src/mqtt.h"
+#include "src/wlan.h"
+#include "src/web/web.h"
+#include "src/icons.h"       // icon192_png / icon512_png PROGMEM-Arrays
 
 // ==========================
 // GLOBALE OBJEKTE
@@ -57,6 +58,10 @@ int stallLightMinutes = 1;   // in light.cpp referenziert
 // ==========================
 void setup()
 {
+    // WDT
+    esp_task_wdt_config_t wdt_cfg = { .timeout_ms = 20000, .idle_core_mask = 3, .trigger_panic = true };
+    esp_task_wdt_init(&wdt_cfg);
+    esp_task_wdt_add(NULL);
 
     Serial.begin(115200);
     Serial.println("\n🐔 Hühnerklappe – FW " + String(FW_VERSION));
@@ -79,12 +84,14 @@ void setup()
     pinMode(STALLLIGHT_RELAY_PIN,OUTPUT);digitalWrite(STALLLIGHT_RELAY_PIN, RELAY_OFF);
     pinMode(BUTTON_PIN,         INPUT_PULLUP);
     pinMode(STALL_BUTTON_PIN,   INPUT_PULLUP);
-    pinMode(RED_BUTTON_PIN,     INPUT_PULLUP);
     pinMode(LIMIT_OPEN_PIN,     INPUT_PULLUP);
     pinMode(LIMIT_CLOSE_PIN,    INPUT_PULLUP);
+    pinMode(WS2812_PIN,         OUTPUT); digitalWrite(WS2812_PIN, LOW);
 
-    // ===== RGB + MOTOR =====
-    lightInit();
+    // ===== WS2812 + MOTOR =====
+    stallLight.begin();
+    stallLight.clear();
+    stallLight.show();
     motorInit();
 
     // ===== I2C + RTC + VEML =====
@@ -212,9 +219,9 @@ void setup()
         else { stallLightOn(); server.send(200, "text/plain", "ON"); }
     });
 
-    server.on("/rgbred", []() {
-        if (rgbRedActive) { rgbRedOff(); server.send(200, "text/plain", "OFF"); }
-        else { rgbRedOn(); server.send(200, "text/plain", "ON"); }
+    server.on("/ws2812red", []() {
+        if (ws2812RedActive) { ws2812RedOff(); server.send(200, "text/plain", "OFF"); }
+        else { ws2812RedOn(); server.send(200, "text/plain", "ON"); }
     });
 
     server.on("/motor/up", []() {
@@ -241,7 +248,7 @@ void setup()
 
     server.on("/systemtest-status", HTTP_GET, []() {
         updateSystemHealth();
-        JsonDocument doc;
+        StaticJsonDocument<320> doc;
         doc["wifi"]           = (WiFi.status() == WL_CONNECTED);
         doc["rssi"]           = WiFi.RSSI();
         doc["mqtt"]           = mqttClientConnected();
@@ -311,41 +318,17 @@ void setup()
     // OTA
     server.on("/update", HTTP_POST,
         []() {
-            bool ok = !Update.hasError() && Update.end(true);
-            Serial.printf("OTA end: ok=%d error=%d\n", ok, Update.getError());
-            if (!ok) Update.printError(Serial);
+            bool ok = Update.end(true);
             server.send(ok ? 200 : 500, "text/plain; charset=UTF-8", ok ? "Update erfolgreich" : "Update fehlgeschlagen");
-            otaInProgress = false;
-            ioSafeState   = false;
+            leaveIoSafeState(); otaInProgress = false;
             if (ok) { delay(300); ESP.restart(); }
         },
         []() {
+            if (!otaInProgress) { otaInProgress = true; enterIoSafeState(); }
             HTTPUpload &u = server.upload();
-            if (u.status == UPLOAD_FILE_START) {
-                // Nur das Nötigste – kein MQTT, kein Log, kein Blocking!
-                otaInProgress = true;
-                ioSafeState   = true;
-                motorStop();
-                digitalWrite(MOTOR_IN1, LOW);
-                digitalWrite(MOTOR_IN2, LOW);
-                lightOff();
-                stallLightOff();
-                Serial.printf("OTA start: %s\n", u.filename.c_str());
-                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
-            }
-            else if (u.status == UPLOAD_FILE_WRITE) {
-                if (Update.write(u.buf, u.currentSize) != u.currentSize)
-                    Update.printError(Serial);
-            }
-            else if (u.status == UPLOAD_FILE_END) {
-                Serial.printf("OTA upload done: %d bytes\n", u.totalSize);
-            }
-            else if (u.status == UPLOAD_FILE_ABORTED) {
-                Serial.println("OTA aborted");
-                Update.abort();
-                otaInProgress = false;
-                ioSafeState   = false;
-            }
+            if      (u.status == UPLOAD_FILE_START)  { if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial); }
+            else if (u.status == UPLOAD_FILE_WRITE)  { esp_task_wdt_reset(); if (Update.write(u.buf, u.currentSize) != u.currentSize) Update.printError(Serial); }
+            else if (u.status == UPLOAD_FILE_ABORTED){ Update.abort(); leaveIoSafeState(); otaInProgress = false; }
         }
     );
 
@@ -363,17 +346,14 @@ void setup()
 // ==========================
 void loop()
 {
-    // WebServer bei jedem Durchlauf bedienen
-    server.handleClient();
-
-    // Während OTA-Upload: nur WebServer, kein delay, keine Logik
-    if (otaInProgress) return;
-
     const unsigned long nowMs = millis();
+
     if (nowMs - lastLogicRun < LOGIC_INTERVAL) { delay(1); return; }
     lastLogicRun = nowMs;
 
-    // ===== NETZWERK =====
+    // ===== WEBSERVER / WDT / NETZWERK =====
+    server.handleClient();
+    esp_task_wdt_reset();
     mqttLoop();
     wifiWatchdog();
 
@@ -381,7 +361,6 @@ void loop()
     updateMotor();
     updateButton();
     updateStallButton();
-    updateRedButton();
 
     // ===== LUX LESEN (alle 1s) =====
     float rawLux = NAN;

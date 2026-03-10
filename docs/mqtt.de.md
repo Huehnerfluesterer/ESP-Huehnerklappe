@@ -1,181 +1,224 @@
-# 📡 MQTT Integration
+# 📡 MQTT-Dokumentation
 
-Der **Smart Chicken Coop Door Controller** unterstützt MQTT zur Überwachung und Fernsteuerung.
-
-Damit lässt sich das System einfach in Smart-Home Systeme integrieren, z.B.:
-
-* Home Assistant
-* Node-RED
-* OpenHAB
-* eigene Dashboards
+🇬🇧 [English](mqtt.md) &nbsp;|&nbsp; 🇩🇪 Deutsch
 
 ---
 
-# 📂 Basis Topic
+## Inhaltsverzeichnis
 
-Alle MQTT Topics verwenden folgendes Basis-Topic:
-
-```
-chickencoop/
-```
-
-Beispiel:
-
-```
-chickencoop/door/state
-```
+- [Konfiguration](#-konfiguration)
+- [Topics – Überblick](#-topics--überblick)
+- [Status-Payload](#-status-payload)
+- [Befehle (cmd)](#-befehle-cmd)
+- [Einstellungen per MQTT](#-einstellungen-per-mqtt)
+- [Home Assistant](#-home-assistant-integration)
 
 ---
 
-# 🌳 MQTT Topic Struktur
+## ⚙️ Konfiguration
 
-```
-chickencoop
-│
-├── door
-│   ├── state        → Türstatus
-│   ├── action       → aktuelle Bewegung
-│   ├── open         → Tür öffnen
-│   └── close        → Tür schließen
-│
-├── light
-│   ├── state        → Lichtstatus
-│   ├── on           → Licht einschalten
-│   └── off          → Licht ausschalten
-│
-├── sensor
-│   ├── lux          → aktueller Lux-Messwert
-│   └── status       → Sensorstatus
-│
-└── system
-    ├── uptime       → Laufzeit des Controllers
-    ├── wifi         → WLAN Signalstärke
-    └── version      → Firmware Version
-```
+MQTT wird im Web-Interface unter **`/mqtt`** konfiguriert:
+
+| Feld | Beschreibung | Beispiel |
+|---|---|---|
+| **Aktiviert** | MQTT ein/ausschalten | ✅ |
+| **Host** | IP oder Hostname des Brokers | `192.168.1.100` |
+| **Port** | Standard MQTT-Port | `1883` |
+| **Client-ID** | Eindeutiger Name des Geräts | `huehnerklappe` |
+| **Base-Topic** | Präfix für alle Topics | `huehnerklappe` |
+| **Benutzer** | Optional, falls Broker Authentifizierung verlangt | `mqtt_user` |
+| **Passwort** | Optional | `geheim` |
+
+Nach dem Speichern verbindet sich der ESP32 automatisch mit dem Broker. Mit dem Button **„Verbindung testen"** kann die Verbindung vorab geprüft werden.
 
 ---
 
-# 📊 MQTT Kommunikationsdiagramm
+## 📋 Topics – Überblick
 
-```mermaid
-flowchart LR
+Alle Topics verwenden den konfigurierten **Base-Topic** als Präfix (Standard: `huehnerklappe`).
 
-ESP[ESP32 Coop Controller]
+### Ausgehend (ESP32 → Broker)
 
-HA[Home Assistant]
-NR[Node-RED]
-MQTT[(MQTT Broker)]
+| Topic | Inhalt | Typ |
+|---|---|---|
+| `{base}/available` | `online` / `offline` | String |
+| `{base}/status` | Vollständiger Gerätestatus | JSON |
+| `{base}/settings` | Aktuelle Einstellungen | JSON (retained) |
+| `{base}/log` | Neue Logbuch-Einträge | String |
 
-ESP -->|Status veröffentlichen| MQTT
-MQTT --> HA
-MQTT --> NR
+### Eingehend (Broker → ESP32)
 
-HA -->|Befehle| MQTT
-NR -->|Befehle| MQTT
-
-MQTT --> ESP
-```
+| Topic | Inhalt | Typ |
+|---|---|---|
+| `{base}/cmd` | Steuerbefehl | JSON |
 
 ---
 
-# 📥 Status Topics (vom Controller veröffentlicht)
+## 📊 Status-Payload
 
-Diese Topics werden **vom Controller veröffentlicht**.
+Das Topic `{base}/status` wird bei jeder Statusänderung veröffentlicht.
 
-| Topic                       | Beispiel          | Beschreibung           |
-| --------------------------- | ----------------- | ---------------------- |
-| `chickencoop/door/state`    | `open` / `closed` | aktueller Türstatus    |
-| `chickencoop/door/action`   | `opening`         | aktuelle Bewegung      |
-| `chickencoop/light/state`   | `on`              | Status des Stalllichts |
-| `chickencoop/sensor/lux`    | `250`             | gemessener Lux-Wert    |
-| `chickencoop/sensor/status` | `ok`              | Sensorstatus           |
+**Beispiel:**
+
+```json
+{
+  "door": "open",
+  "doorPhase": "OPEN",
+  "motor": "STOPPED",
+  "motorReason": "Automatik/Lux",
+  "lux": 342.5,
+  "luxReady": true,
+  "luxRate": -12.3,
+  "lightActive": false,
+  "stallLightActive": true,
+  "rgbRedActive": false,
+  "wifiRssi": -58,
+  "mqttConnected": true,
+  "rtcOk": true,
+  "vemlOk": true,
+  "uptime": 86400,
+  "fwVersion": "1.0.15"
+}
+```
+
+| Feld | Typ | Beschreibung |
+|---|---|---|
+| `door` | String | `open` / `closed` |
+| `doorPhase` | String | `IDLE` / `OPENING` / `OPEN` / `CLOSING` |
+| `motor` | String | `STOPPED` / `OPENING` / `CLOSING` |
+| `motorReason` | String | Auslöser der letzten Motoraktion |
+| `lux` | Float | Aktueller gefilterter Lux-Wert |
+| `luxReady` | Bool | Sensor hat stabilen Wert geliefert |
+| `luxRate` | Float | Lux-Änderungsrate (lx/min) |
+| `lightActive` | Bool | Locklicht aktiv |
+| `stallLightActive` | Bool | Stalllicht aktiv |
+| `rgbRedActive` | Bool | RGB-Rotlicht aktiv |
+| `wifiRssi` | Int | WLAN-Signalstärke in dBm |
+| `rtcOk` | Bool | RTC DS3231 korrekt erkannt |
+| `vemlOk` | Bool | VEML7700 korrekt erkannt |
+| `uptime` | Int | Laufzeit in Sekunden |
+| `fwVersion` | String | Aktuell installierte Firmware-Version |
 
 ---
 
-# 📤 Command Topics (vom Controller abonniert)
+## 🎮 Befehle (cmd)
 
-Diese Topics werden **vom Controller abonniert**, um Befehle zu empfangen.
+Steuerung des Geräts über das Topic **`{base}/cmd`** mit JSON-Payload:
 
-| Topic                    | Payload | Funktion          |
-| ------------------------ | ------- | ----------------- |
-| `chickencoop/door/open`  | `1`     | Tür öffnen        |
-| `chickencoop/door/close` | `1`     | Tür schließen     |
-| `chickencoop/light/on`   | `1`     | Licht einschalten |
-| `chickencoop/light/off`  | `1`     | Licht ausschalten |
+### Türsteuerung
 
----
-
-# 🧪 Beispiel MQTT Befehle
-
-## Tür öffnen
-
-Topic
-
-```
-chickencoop/door/open
+```json
+{ "door": "open" }
+{ "door": "close" }
+{ "door": "stop" }
 ```
 
-Payload
+### Lichtsteuerung
 
-```
-1
-```
-
----
-
-## Tür schließen
-
-Topic
-
-```
-chickencoop/door/close
+```json
+{ "light": "on" }
+{ "light": "off" }
+{ "stalllight": "on" }
+{ "stalllight": "off" }
+{ "rgbred": "on" }
+{ "rgbred": "off" }
 ```
 
-Payload
+### System
 
-```
-1
+```json
+{ "reset": true }
 ```
 
 ---
 
-# 🏠 Beispiel Home Assistant Integration
+## 📝 Einstellungen per MQTT
+
+Einstellungen können auch über MQTT übermittelt werden (gleiche Struktur wie `/settings`-Seite):
+
+```json
+{
+  "openMode": "lux",
+  "closeMode": "lux",
+  "openTime": "07:00",
+  "closeTime": "21:00",
+  "openLightThreshold": 200,
+  "closeLightThreshold": 20,
+  "lampPreOpen": 10,
+  "lampPostOpen": 5,
+  "lampPreClose": 15,
+  "lampPostClose": 5
+}
+```
+
+---
+
+## 🏠 Home Assistant Integration
+
+### Manuelle Konfiguration (configuration.yaml)
 
 ```yaml
-switch:
-  - platform: mqtt
-    name: "Hühnerstall Tür"
-    command_topic: "chickencoop/door/open"
-    state_topic: "chickencoop/door/state"
+mqtt:
+  # Tür
+  cover:
+    - name: "Hühnerklappe"
+      unique_id: huehnerklappe_door
+      command_topic: "huehnerklappe/cmd"
+      state_topic: "huehnerklappe/status"
+      value_template: "{{ value_json.door }}"
+      payload_open: '{"door":"open"}'
+      payload_close: '{"door":"close"}'
+      payload_stop: '{"door":"stop"}'
+      state_open: "open"
+      state_closed: "closed"
+      availability_topic: "huehnerklappe/available"
+      device_class: gate
+
+  # Locklicht
+  light:
+    - name: "Locklicht"
+      unique_id: huehnerklappe_light
+      command_topic: "huehnerklappe/cmd"
+      state_topic: "huehnerklappe/status"
+      value_template: "{{ value_json.lightActive }}"
+      payload_on: '{"light":"on"}'
+      payload_off: '{"light":"off"}'
+      state_on: true
+      state_off: false
+
+  # Stalllicht
+    - name: "Stalllicht"
+      unique_id: huehnerklappe_stalllight
+      command_topic: "huehnerklappe/cmd"
+      state_topic: "huehnerklappe/status"
+      value_template: "{{ value_json.stallLightActive }}"
+      payload_on: '{"stalllight":"on"}'
+      payload_off: '{"stalllight":"off"}'
+      state_on: true
+      state_off: false
+
+  # Sensoren
+  sensor:
+    - name: "Helligkeit Hühnerstall"
+      unique_id: huehnerklappe_lux
+      state_topic: "huehnerklappe/status"
+      value_template: "{{ value_json.lux | round(1) }}"
+      unit_of_measurement: "lx"
+      device_class: illuminance
+
+    - name: "Hühnerklappe Firmware"
+      unique_id: huehnerklappe_fw
+      state_topic: "huehnerklappe/status"
+      value_template: "{{ value_json.fwVersion }}"
+      icon: mdi:chip
+
+  binary_sensor:
+    - name: "Hühnerklappe Online"
+      unique_id: huehnerklappe_available
+      state_topic: "huehnerklappe/available"
+      payload_on: "online"
+      payload_off: "offline"
+      device_class: connectivity
 ```
 
----
-
-# 📈 Optionale System Topics
-
-Für Diagnose und Monitoring können zusätzliche Topics veröffentlicht werden.
-
-| Topic                        | Beschreibung       |
-| ---------------------------- | ------------------ |
-| `chickencoop/system/uptime`  | Laufzeit des ESP32 |
-| `chickencoop/system/wifi`    | WLAN Signalstärke  |
-| `chickencoop/system/version` | Firmware Version   |
-| `chickencoop/system/restart` | Neustart Grund     |
-
----
-
-# 🧠 Empfehlungen für MQTT
-
-| Einstellung | Empfehlung                   |
-| ----------- | ---------------------------- |
-| QoS         | 0 oder 1                     |
-| Retain      | aktiviert für Status Topics  |
-| Client ID   | eindeutige ID pro Controller |
-
----
-
-# 📜 Hinweise
-
-* Status Topics sollten **retain aktiviert haben**, damit Smart-Home Systeme den letzten Zustand kennen.
-* Command Topics sollten **kein retain verwenden**, um unbeabsichtigte Wiederholungen zu vermeiden.
-* Die Topic Struktur folgt üblichen IoT-Konventionen für bessere Integration.
+> 💡 Mit **MQTT Discovery** (falls aktiviert) werden Entitäten in Home Assistant automatisch erkannt, ohne manuelle Konfiguration.

@@ -1,105 +1,238 @@
-# 🧠 Firmware Architektur
+# 🧠 System-Architektur
 
-Dieses Diagramm zeigt den grundlegenden Aufbau der Firmware des Chicken Coop Door Controllers.
+🇬🇧 [English](architecture.md) &nbsp;|&nbsp; 🇩🇪 Deutsch
 
-```mermaid
-flowchart TD
+---
 
-A[VEML7700 Lux Sensor] --> B[Sensor Validierung]
+## Inhaltsverzeichnis
 
-B --> C[Median Filter]
-C --> D[Exponentielle Glättung]
+- [Überblick](#-überblick)
+- [Projektstruktur](#-projektstruktur)
+- [Lux-Verarbeitungs-Pipeline](#-lux-verarbeitungs-pipeline)
+- [Zustandsmaschinen](#-zustandsmaschinen)
+- [Automatik-Logik](#-automatik-logik)
+- [Loop-Architektur](#-loop-architektur)
 
-D --> E[Lux Trend Berechnung]
-E --> F[Sonnenuntergang Prognose]
+---
 
-F --> G{Schwellwert erreicht?}
+## 🗺 Überblick
 
-G -->|Ja| H[Vorlicht aktivieren]
-H --> I[Tür schließen]
+Das System ist modular aufgebaut. Jede Komponente hat eine klar abgegrenzte Verantwortlichkeit:
 
-G -->|Nein| J[Prognose Timer]
-
-I --> K[Nacht Sperre]
-
-K --> L[Tür geschlossen]
-
-%% Sicherheitssysteme
-
-B --> M[Sensor Health Monitoring]
-M --> N[Fallback System]
-
-N --> O[Zeitbasierte Steuerung]
-
-%% Connectivity
-
-L --> P[MQTT Status Publish]
-P --> Q[Home Assistant]
-
-%% Webinterface
-
-R[Web Interface] --> S[Manuelle Steuerung]
-S --> I
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                          main.cpp                               │
+│          Setup · Loop · WebServer-Routen · OTA                  │
+└───────┬──────────────────────────────────────────────┬──────────┘
+        │                                              │
+   ┌────▼─────┐  ┌──────────┐  ┌──────────┐  ┌───────▼──────┐
+   │  logic   │  │   lux    │  │  motor   │  │     web/     │
+   │ Automatik│  │ VEML7700 │  │  L298N   │  │  Webserver   │
+   └────┬─────┘  └──────────┘  └──────────┘  └──────────────┘
+        │
+   ┌────▼─────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐
+   │  light   │  │   door   │  │   mqtt   │  │   storage    │
+   │  Licht   │  │  Taster  │  │  MQTT    │  │   EEPROM     │
+   └──────────┘  └──────────┘  └──────────┘  └──────────────┘
+        │
+   ┌────▼─────┐  ┌──────────┐
+   │  system  │  │  logger  │
+   │  Health  │  │ Logbuch  │
+   └──────────┘  └──────────┘
 ```
 
 ---
 
-# Firmware Komponenten
+## 📁 Projektstruktur
 
-## Sensor Layer
-
-* VEML7700 Lux Sensor
-* automatische Gain Anpassung
-* Sensor Health Monitoring
-* I²C Bus Recovery
-
----
-
-## Signal Processing
-
-Verarbeitung der Rohdaten:
-
-* Median Filter
-* exponentielle Glättung
-* Lux Trend Berechnung
-
----
-
-## Decision Engine
-
-Entscheidet über Öffnen oder Schließen:
-
-* Lux Schwellenwerte
-* Sonnenuntergang Prognose
-* Wolken Erkennung
-
----
-
-## Actuation Layer
-
-Steuert die Hardware:
-
-* Vorlicht
-* Türmotor
-* Endschalter
+```
+ESP-Huehnerklappe/
+├── platformio.ini              # Build-Konfiguration, Bibliotheken
+└── src/
+    ├── config.h                # ⚠️ WLAN-Zugangsdaten (in .gitignore!)
+    ├── pins.h                  # Alle GPIO-Pin-Definitionen
+    ├── types.h                 # Enums (DoorPhase, MotorState, LightState)
+    │                           # und Structs (Settings, MqttSettings)
+    ├── main.cpp                # Setup, Loop, alle WebServer-Routen, OTA
+    ├── motor.cpp / motor.h     # L298N-Ansteuerung via LEDC-PWM
+    ├── door.cpp  / door.h      # Türzustand, Taster-Handling
+    ├── lux.cpp   / lux.h       # VEML7700: Sensor, Filter, Trend, Recovery
+    ├── light.cpp / light.h     # Licht-Automatik, RGB-PWM, Dimmer
+    ├── logic.cpp / logic.h     # Automatik-Entscheidungslogik
+    ├── mqtt.cpp  / mqtt.h      # PubSubClient-Wrapper, Topics, Publish
+    ├── wlan.cpp  / wlan.h      # WLAN-Verbindung, Watchdog
+    ├── storage.cpp / storage.h # EEPROM-Lesen/Schreiben
+    ├── logger.cpp  / logger.h  # Ringpuffer-Logbuch im EEPROM
+    ├── system.cpp  / system.h  # System-Health, Uptime
+    ├── icons.h                 # PWA-Icons als PROGMEM-Arrays
+    └── web/
+        ├── web.h               # Webserver-Header, Routing
+        ├── web_root.cpp        # Startseite (Dashboard)
+        ├── web_pages.cpp       # Systemtest, Logbuch, Firmware-Update
+        ├── web_settings.cpp    # Einstellungs- und MQTT-Seite
+        └── web_helpers.cpp     # HTML-Bausteine, CSS, gemeinsame Elemente
+```
 
 ---
 
-## Safety Layer
+## 🔬 Lux-Verarbeitungs-Pipeline
 
-Sicherheitsfunktionen:
+Jeder Lux-Rohwert durchläuft eine mehrstufige Pipeline, bevor er für Entscheidungen verwendet wird:
 
-* Nacht Sperre
-* Sensor Fallback
-* Zeitbasierte Steuerung
-* Endschalter Schutz
+```
+VEML7700 Hardware
+      │
+      ▼
+┌─────────────┐
+│ Rohwert     │  getLux() – direkte I²C-Abfrage
+│ Messung     │  Fehler → NAN
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ Median-     │  medianLux(rawValue)
+│ Filter      │  Puffergröße 5, sortierte Auswahl des Mittenwerts
+│             │  Filtert: Spitzen, Einzelausreißer
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ EMA-Filter  │  lux = lux * 0.8 + raw * 0.2
+│ (exponential│  Glättet: kurze Schwankungen, Rauschen
+│ moving avg) │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ Trend-      │  updateLuxTrend() alle 30 s
+│ Berechnung  │  luxRate = (lux - lastLux) / deltaTime
+│             │  → lx/min Änderungsrate
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ Prognose    │  runAutomatik()
+│ Logik       │  minutesToThresh = (lux - threshold) / luxRate
+│             │  Entscheidung: Vorlicht starten / Schließen
+└─────────────┘
+```
 
 ---
 
-## Connectivity Layer
+## 🔄 Zustandsmaschinen
 
-Kommunikation mit externen Systemen:
+### Türzustand (DoorPhase)
 
-* MQTT
-* Webinterface
-* OTA Updates
+```
+         ┌─────────────────────────────────────┐
+         │                                     │
+    ─────▼─────                          ──────┴──────
+    │  IDLE   │ ──── Öffnen ausgelöst ──► │ OPENING  │
+    │         │                           │          │
+    └────┬────┘                           └────┬─────┘
+         ▲                                     │ Endposition / Timeout
+         │                              ───────▼──────
+    Schließen                           │    OPEN    │
+    abgeschlossen                       │            │
+         │                              └────┬───────┘
+    ─────┴───────                            │ Schließen ausgelöst
+    │ CLOSING  │ ◄─── Schließen ausgelöst ───┘
+    │          │
+    └──────────┘
+```
+
+### Motorzustand (MotorState)
+
+```
+MOTOR_STOPPED ◄──── Timeout / Endschalter / Stop-Befehl
+      │
+      ├──── startMotorOpen()  ────► MOTOR_OPENING
+      └──── startMotorClose() ────► MOTOR_CLOSING
+```
+
+### Lichtzustand (LightState)
+
+```
+LIGHT_OFF
+   │
+   ├──► LIGHT_PRE_OPEN    (Vorlicht vor Türöffnung)
+   │         │
+   │         ▼
+   │    LIGHT_POST_OPEN   (Nachlicht nach Öffnung)
+   │         │
+   │         ▼
+   │    LIGHT_OFF
+   │
+   └──► LIGHT_PRE_CLOSE   (Vorlicht vor Türschließung, mit Wolken-Abort)
+             │
+             ▼
+        LIGHT_POST_CLOSE  (Nachlicht nach Schließung, mit Dimmen)
+             │
+             ▼
+        LIGHT_OFF
+```
+
+---
+
+## 🤖 Automatik-Logik
+
+Die Funktion `runAutomatik()` in `logic.cpp` wird alle 200 ms aufgerufen und trifft alle automatischen Entscheidungen:
+
+```
+runAutomatik()
+│
+├── Modus = "time"?
+│     └── Uhrzeitvergleich → Öffnen / Schließen
+│
+├── Modus = "lux"?
+│     ├── luxReady && luxValid?
+│     │     ├── lux > openThreshold → Tür öffnen (mit Hysterese + Hold-Timer)
+│     │     ├── lux < closeThreshold
+│     │     │     ├── Prognose aktiv? → minutesToThresh berechnen
+│     │     │     ├── Vorlicht starten (PRE_CLOSE)
+│     │     │     └── lux stabil < Schwelle → Schließen auslösen
+│     │     └── Wolken-Abort: lux steigt → PRE_CLOSE abbrechen
+│     │
+│     └── luxReady = false → Fallback auf Zeitsteuerung
+│
+├── Nacht-Sperre aktiv? → kein Öffnen
+├── manualOverrideUntil > jetzt? → Automatik pausiert
+└── actionLock? → warten bis Motor stoppt
+```
+
+---
+
+## ⏱ Loop-Architektur
+
+Der Haupt-Loop in `main.cpp` läuft alle **200 ms** (konfigurierbar via `LOGIC_INTERVAL`):
+
+```
+loop()
+│
+├── server.handleClient()        ← WebServer, immer
+│
+├── if (otaInProgress) return    ← OTA hat Vorrang
+│
+├── mqttLoop()                   ← MQTT keep-alive + empfangen
+├── wifiWatchdog()               ← Reconnect bei Verbindungsverlust
+│
+├── updateMotor()                ← Timeout + Endschalter prüfen
+├── updateButton()               ← Taster Tür
+├── updateStallButton()          ← Taster Stalllicht
+├── updateRedButton()            ← Taster Rotlicht
+│
+├── getLux() (alle 1 s)          ← Sensor lesen
+├── medianLux()                  ← Medianfilter
+├── EMA-Filter                   ← Exponentielles Glätten
+├── checkLuxHealth()             ← Fehlerüberwachung + Recovery
+├── updateLuxTrend() (alle 30 s) ← Änderungsrate berechnen
+│
+├── updateSystemHealth()         ← Heap, Uptime, Sensor-Status
+├── updateDimming()              ← RGB-Dimmer aktualisieren
+├── updateStallLightTimer()      ← Stalllicht-Timer
+│
+├── runAutomatik()               ← Automatik-Logik (nur mit RTC)
+└── updateLightState()           ← Lichtzustandsmaschine
+```
+
+> Während eines OTA-Updates wird nur `server.handleClient()` aufgerufen – alle anderen Aktionen sind blockiert, der Motor ist gestoppt, alle Ausgänge sind aus.

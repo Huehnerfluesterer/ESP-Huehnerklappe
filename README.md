@@ -4,226 +4,148 @@
 
 <h1 align="center">🐔 ESP32 Chicken Coop Door Controller</h1>
 <p align="center">
-Lux-based automation • Sunset prediction • MQTT integration
+  Lux-based automation &nbsp;•&nbsp; Sunset prediction &nbsp;•&nbsp; MQTT integration &nbsp;•&nbsp; Web interface &nbsp;•&nbsp; OTA updates
 </p>
-# 🐔 Smart Chicken Coop Door Controller
 
-[![ESP32](https://img.shields.io/badge/ESP32-Compatible-blue)]()
-[![PlatformIO](https://img.shields.io/badge/PlatformIO-Project-orange)]()
-[![MQTT](https://img.shields.io/badge/MQTT-Supported-green)]()
-[![License](https://img.shields.io/badge/License-MIT-yellow)]()
+<p align="center">
+  <img src="https://img.shields.io/badge/ESP32-Compatible-blue" />
+  <img src="https://img.shields.io/badge/PlatformIO-Project-orange" />
+  <img src="https://img.shields.io/badge/Firmware-v1.0.15-brightgreen" />
+  <img src="https://img.shields.io/badge/MQTT-Supported-green" />
+  <img src="https://img.shields.io/badge/License-MIT-yellow" />
+</p>
 
-An **ESP32-based intelligent chicken coop door controller** using ambient light measurements, predictive sunset detection and multiple safety fallbacks.
+---
 
-The system uses a **VEML7700 ambient light sensor** combined with filtering and trend detection to determine the optimal time to open and close the coop door.
+An **ESP32-based intelligent chicken coop door controller** using ambient light measurements, predictive sunset detection, and multiple safety fallbacks.
 
-It is designed for **real-world conditions**, including clouds, storms, snow reflection and sensor noise.
+The system uses a **VEML7700 ambient light sensor** combined with median filtering, exponential smoothing, and trend detection to determine the optimal time to open and close the coop door. It is designed for **real-world conditions** including clouds, rain, snow reflection, and sensor noise.
 
 ---
 
 ## 🌍 Languages
 
-🇬🇧 English
+🇬🇧 English  
 🇩🇪 [Deutsch](README.de.md)
 
 ---
 
 ## ✨ Key Features
 
+| Feature | Description |
+|---|---|
+| 🌅 **Lux Automation** | Opens/closes based on ambient light via VEML7700 |
+| 📉 **Sunset Prediction** | Predicts closing time from lux change rate |
+| 💡 **Pre-Close Light** | Coop light turns on before closing to gather chickens |
+| 🌥 **Cloud Detection** | Cancels false closing triggers caused by passing clouds |
+| ⏰ **Time Fallback** | Switches to time-based control if sensor fails |
+| 🛑 **Limit Switches** | Optional hardware end-stop detection |
+| 📡 **MQTT** | Full Home Assistant / Node-RED integration |
+| 🌐 **Web Interface** | Browser-based control and configuration |
+| 🔧 **OTA Updates** | Firmware updates over the air |
+| 📜 **Event Log** | Persistent log stored in EEPROM |
+| 🔴 **RGB Light** | PWM-controlled RGB LED strip via N-channel MOSFETs |
+
+---
+
 ## 🌅 Lux-Based Automation
 
-Automatic door control based on ambient light.
+Automatic door control based on ambient light using the VEML7700 sensor.
 
-Features include:
+The measurement pipeline processes each reading through multiple stages:
 
-* VEML7700 lux sensor
-* automatic sensor gain switching
-* lux median filtering
-* exponential smoothing
-* lux trend detection
+1. Raw sensor reading with auto gain switching
+2. Median filter (buffer size 5) to suppress noise spikes
+3. Exponential smoothing (EMA) for stable values
+4. Lux trend calculation (rate of change over 30 s)
+5. Predictive closing logic
 
-Reliable detection of **sunrise and sunset conditions** even during cloudy weather.
+Reliable detection of **sunrise and sunset** even during cloudy weather.
 
 ---
 
 ## 📉 Predictive Sunset Detection
 
-The firmware calculates the **lux change rate** to estimate when the closing threshold will be reached.
+The firmware calculates the **lux change rate** to estimate when the closing threshold will be reached:
 
 ```
 minutesToThresh = (lux - threshold) / luxRate
 ```
 
-Advantages:
-
-* earlier preparation for closing
-* smoother dusk behaviour
-* more accurate closing timing
+This allows the system to prepare for closing **before** the threshold is reached, resulting in smoother dusk behaviour and more accurate closing timing.
 
 ---
 
 ## 💡 Pre-Close Coop Light
 
-Before closing the door, the coop light turns on for a configurable duration.
-
-Purpose:
-
-* chickens gather inside the coop
-* safer closing
-* improved winter reliability
+Before closing, the coop light turns on for a configurable duration so that chickens gather inside. If lux rises again (cloud passing), the pre-close sequence is **automatically cancelled**.
 
 ---
 
 ## 🌥 Cloud Stability Detection
 
-Temporary brightness increases caused by clouds are detected and the closing prediction is cancelled:
+Temporary brightness increases are detected and the closing prediction is cancelled:
 
 ```
 lux > closeThreshold + PRECLOSE_ABORT_MARGIN_LX
 ```
 
-This prevents premature closing.
+Prevents premature closing caused by passing clouds.
 
 ---
 
 ## 🔄 Fallback Systems
 
-The controller includes multiple fallback mechanisms.
+### ⏰ Time-Based Fallback
 
-## ⏰ Time-Based Fallback
+If the lux sensor becomes unavailable, the system switches to **time-based door control** automatically. Triggers:
 
-If the lux sensor becomes unavailable, the system switches to **time-based door control**.
+- Sensor hardware failure
+- Invalid lux values
+- I²C communication error
+- Sensor response timeout
 
-Triggers:
+### 📡 Sensor Health Monitoring
 
-* sensor failure
-* invalid lux values
-* I²C errors
-* sensor timeout
+Continuously checks lux validity, I²C communication, sensor response times, and triggers auto-recovery.
 
----
+### 🔌 I²C Bus Recovery
 
-## 📡 Sensor Health Monitoring
-
-The system continuously checks:
-
-* lux validity
-* I²C communication
-* sensor response time
-* auto-recovery attempts
-
----
-
-## 🔌 I²C Bus Recovery
-
-If the I²C bus locks up, the controller performs:
-
-* I²C bus reset
-* sensor reinitialization
-* automatic reconnection
+If the I²C bus locks up: bus reset via 9 clock pulses + STOP condition, followed by sensor reinitialization and automatic reconnection.
 
 ---
 
 ## 🛑 Safety Features
 
-## Door Limit Switches
+**Door Limit Switches** — Physical end-stops detect door fully open / fully closed. Prevents motor damage and mechanical stress. Can be enabled/disabled in the web interface.
 
-Physical limit switches detect:
+**Night Lock** — Once the door closes at night, reopening is blocked until the morning window. Prevents false triggers from outdoor lights.
 
-* door fully open
-* door fully closed
+**Light Glitch Filtering** — Short spikes from lightning, car headlights, or camera flashes are suppressed via lux hysteresis and hold timers.
 
-Prevents motor damage and mechanical stress.
-
----
-
-## Night Lock
-
-Once the door closes at night:
-
-* reopening is blocked
-* prevents false triggers caused by lights
-* reset only occurs in the morning window
-
----
-
-## Light Glitch Filtering
-
-Short light spikes are filtered using:
-
-* lux hysteresis
-* hold timers
-* trend filtering
-
-Ignored events include:
-
-* lightning
-* car headlights
-* camera flashes
-
----
-
-## 📊 Light Processing Pipeline
-
-The light measurement pipeline includes:
-
-1. raw sensor reading
-2. median filtering
-3. exponential smoothing
-4. trend calculation
-5. prediction logic
-
-This ensures **stable behavior in noisy environments**.
+**Motor Blockage Detection** — ACS712 current sensor detects stall conditions. The motor reverses briefly after a blockage.
 
 ---
 
 ## 🌐 Connectivity
 
-## MQTT Integration
+### MQTT Integration
 
-Status and control via MQTT.
+Full status and control via MQTT, compatible with Home Assistant, Node-RED, and other smart home systems. See [MQTT documentation](docs/mqtt.de.md).
 
-Examples:
+### Web Interface
 
-* door state
-* lux values
-* sensor health
-* manual commands
+Built-in web server on port 80. Accessible from any browser on the local network. Installable as a **PWA** on mobile devices.
 
-Compatible with:
-
-* Home Assistant
-* Node-RED
-* other smart home systems
-
----
-
-## 🖥 Web Interface
-
-Built-in web interface for:
-
-* configuration
-* manual door control
-* system status
-* event logs
-
----
-
-## 🔧 OTA Updates
-
-Firmware updates can be installed **over the air** without physical access.
-
----
-
-## 📜 Event Logging
-
-The system logs:
-
-* door movements
-* lux conditions
-* prediction triggers
-* fallback activation
-* sensor errors
+| Route | Function |
+|---|---|
+| `/` | Dashboard: status, door control |
+| `/settings` | Automation settings |
+| `/mqtt` | MQTT configuration |
+| `/learn` | Motor position learning |
+| `/log` | Event log |
+| `/systemtest` | Hardware self-test |
+| `/fw` | OTA firmware update |
 
 ---
 
@@ -231,18 +153,22 @@ The system logs:
 
 Typical setup:
 
-* ESP32
-* VEML7700 lux sensor
-* motor driver
-* door motor
-* limit switches
-* coop light
+- ESP32 DevKit v1
+- VEML7700 lux sensor (I²C)
+- DS3231 RTC module (I²C)
+- L298N motor driver
+- 12 V DC door motor
+- 2× relay module (coop light, stable light)
+- 3× push buttons
+- Optional: limit switches, ACS712 current sensor, RGB LED strip with IRLZ44N MOSFETs
+
+See the full wiring guide: [Hardware & Wiring (Deutsch)](docs/HW.de.md)
 
 ---
 
 ## 📦 Installation
 
-Choose your language:
+See the step-by-step installation guide:
 
 🇬🇧 [Installation Guide (English)](docs/installation.md)  
 🇩🇪 [Installationsanleitung (Deutsch)](docs/installation.de.md)
@@ -263,7 +189,7 @@ Choose your language:
 
 ## 📜 License
 
-MIT License
+MIT License — free to use, modify, and distribute.
 
 ---
 
