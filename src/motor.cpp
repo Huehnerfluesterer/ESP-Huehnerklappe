@@ -89,8 +89,9 @@ void motorInit()
     digitalWrite(MOTOR_IN1, LOW);
     digitalWrite(MOTOR_IN2, LOW);
 
-    ledcAttach(MOTOR_ENA, 2000, 8); // 2 kHz, 8 Bit – Pin-basiert (Core 3.x)
-    Serial.println("✅ LEDC Motor-PWM initialisiert (GPIO " + String(MOTOR_ENA) + ")");
+    ledcSetup(3, 2000, 8);          // Kanal 3 (0–2 = RGB), 2 kHz, 8 Bit
+    ledcAttachPin(MOTOR_ENA, 3);    // Core 2.x API
+    Serial.println("✅ LEDC Motor-PWM initialisiert (GPIO " + String(MOTOR_ENA) + ", Kanal 3)");
 }
 
 // ==================================================
@@ -100,21 +101,21 @@ void motorStop()
 {
     digitalWrite(MOTOR_IN1, LOW);
     digitalWrite(MOTOR_IN2, LOW);
-    ledcWrite(MOTOR_ENA, 0);
+    ledcWrite(3, 0);
 }
 
 void motorOpen()
 {
     digitalWrite(MOTOR_IN1, HIGH);
     digitalWrite(MOTOR_IN2, LOW);
-    ledcWrite(MOTOR_ENA, 180);
+    ledcWrite(3, 180);
 }
 
 void motorClose()
 {
     digitalWrite(MOTOR_IN1, LOW);
     digitalWrite(MOTOR_IN2, HIGH);
-    ledcWrite(MOTOR_ENA, 180);
+    ledcWrite(3, 180);
 }
 
 void startMotorOpen(unsigned long durationMs)
@@ -175,13 +176,13 @@ void updateMotor()
     // ===== BLOCKADEERKENNUNG (ACS712) =====
     // Nach 500ms Anlaufzeit: Baseline einmessen; danach alle 200ms prüfen
     static unsigned long lastBlockadeCheck = 0;
-    if (blockadeEnabled && millis() - motorStartedAt > 500UL)
+    if (millis() - motorStartedAt > 500UL)
     {
         if (!currentCalibrated)
         {
-            calibrateBaseline();
+            calibrateBaseline();  // immer einmessen, auch wenn Erkennung deaktiviert
         }
-        else if (millis() - lastBlockadeCheck > 200UL)
+        else if (blockadeEnabled && millis() - lastBlockadeCheck > 200UL)
         {
             lastBlockadeCheck = millis();
             float amps = measureCurrentAmps();

@@ -48,7 +48,7 @@ void enterIoSafeState()
     motorStop();
     digitalWrite(MOTOR_IN1, LOW);
     digitalWrite(MOTOR_IN2, LOW);
-    ledcWrite(MOTOR_ENA, 0);
+    ledcWrite(3, 0);
 
     lightOff();
     stallLightOff();

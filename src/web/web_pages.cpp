@@ -141,7 +141,7 @@ void handleBlockade()
     </div>
     <div class="status-row">
       <span class="label">Eingemessene Baseline</span>
-      <span>%BASELINE_A% A</span>
+      <span id="baseline">%BASELINE_A% A</span>
     </div>
     <div class="status-row">
       <span class="label">Höchster gemessener Strom</span>
@@ -209,6 +209,9 @@ function refreshLive(){
   });
   fetch("/blockade-peak").then(r=>r.text()).then(t=>{
     document.getElementById("peak").textContent=t+" A";
+  });
+  fetch("/blockade-baseline").then(r=>r.text()).then(t=>{
+    document.getElementById("baseline").textContent = t==="--" ? "-- (Motor läuft noch nicht)" : t+" A";
   });
 }
 function resetPeak(){

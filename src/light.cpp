@@ -21,8 +21,10 @@ bool          dimmingActive     = false;
 unsigned long dimStartTime      = 0;
 unsigned long dimEndTime        = 0;
 
-// LEDC-Kanal-Handles (automatisch vergeben)
-static int chR = -1, chG = -1, chB = -1;
+// LEDC-Kanäle (fest vergeben, Core 2.x)
+static const int chR = 0;
+static const int chG = 1;
+static const int chB = 2;
 
 // Warm-weiß Farbwerte
 static const uint8_t WW_R = 255;
@@ -34,14 +36,14 @@ static const uint8_t WW_B =  60;
 // ==================================================
 void lightInit()
 {
-    chR = ledcAttach(RGB_PIN_R, RGB_FREQ, RGB_BITS);
-    chG = ledcAttach(RGB_PIN_G, RGB_FREQ, RGB_BITS);
-    chB = ledcAttach(RGB_PIN_B, RGB_FREQ, RGB_BITS);
-
-    if (chR < 0 || chG < 0 || chB < 0)
-        Serial.println("❌ RGB LEDC: Kein Kanal verfügbar");
-    else
-        Serial.printf("✅ RGB LEDC R=%d G=%d B=%d\n", chR, chG, chB);
+    // Core 2.x API: ledcSetup + ledcAttachPin
+    ledcSetup(chR, RGB_FREQ, RGB_BITS);
+    ledcSetup(chG, RGB_FREQ, RGB_BITS);
+    ledcSetup(chB, RGB_FREQ, RGB_BITS);
+    ledcAttachPin(RGB_PIN_R, chR);
+    ledcAttachPin(RGB_PIN_G, chG);
+    ledcAttachPin(RGB_PIN_B, chB);
+    Serial.printf("✅ RGB LEDC R=%d G=%d B=%d\n", chR, chG, chB);
 
     // Sicher aus beim Start
     ledcWrite(chR, 0); ledcWrite(chG, 0); ledcWrite(chB, 0);

@@ -1,7 +1,7 @@
 // ==========================
 // FIRMWARE VERSION
 // ==========================
-const char *FW_VERSION = "2.0.16";
+const char *FW_VERSION = "1.0.15";
 
 // ==========================
 // INCLUDES
@@ -164,6 +164,12 @@ void setup()
     });
     server.on("/blockade-peak", HTTP_GET, []() {
         server.send(200, "text/plain", String(peakCurrentA, 2));
+    });
+    server.on("/blockade-baseline", HTTP_GET, []() {
+        if (currentCalibrated)
+            server.send(200, "text/plain", String(currentBaseline, 2));
+        else
+            server.send(200, "text/plain", "--");
     });
     server.on("/blockade-peak-reset", HTTP_POST, []() {
         peakCurrentA = 0.0f;
