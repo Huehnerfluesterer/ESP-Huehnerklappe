@@ -326,4 +326,3 @@ ACS712 OUT  ──── C1 (100 nF) ──── GND   ← Rauschfilter, parall
 │  GND ──────────────── alle GNDs     │
 └─────────────────────────────────────┘
 ```
-Test
