@@ -38,6 +38,9 @@
 | **Widerstand 470 Ω** | Gate-Vorwiderstand für MOSFET | 3 |
 | **RGB LED-Strip 12 V** | Getrennte R/G/B-Kanäle (kein WS2812!) | nach Bedarf |
 | **ACS712 (5 A oder 20 A)** | Stromsensor für Motorblockade-Erkennung | 1 |
+| **Widerstand 10 kΩ** | Spannungsteiler R1 für ACS712 (OUT → GPIO 34) | 1 |
+| **Widerstand 20 kΩ** | Spannungsteiler R2 für ACS712 (GPIO 34 → GND) | 1 |
+| **Kondensator 100 nF** | Keramik, Rauschfilter ACS712-Ausgang | 1 |
 | **Endschalter / Mikroschalter** | Für genaue Positions-Erkennung | 2 |
 | **Gehäuse IP65** | Wetterfester Anschlusskasten | 1 |
 
@@ -57,7 +60,7 @@
 | **GPIO 33** | Taster Tür | Taster 1 | INPUT_PULLUP |
 | **GPIO 32** | Taster Stalllicht | Taster 2 | INPUT_PULLUP |
 | **GPIO 35** | Taster Rotlicht | Taster 3 | INPUT_PULLUP, **nur Eingang!** |
-| **GPIO 34** | ACS712 analog | Stromsensor | INPUT only, kein PULLUP |
+| **GPIO 34** | ACS712 analog | Stromsensor | INPUT only, Spannungsteiler 10k/20kΩ + 100nF nötig |
 | **GPIO 21** | I²C SDA | VEML7700 + DS3231 | gemeinsamer Bus |
 | **GPIO 22** | I²C SCL | VEML7700 + DS3231 | gemeinsamer Bus |
 | **GPIO 14** | Endschalter AUF | Mikroschalter | LOW = Position erreicht |
@@ -210,12 +213,86 @@ Im Web-Interface unter **Erweiterte Einstellungen** aktivieren.
 
 ### 8 · ACS712 Stromsensor (optional)
 
+Der ACS712 wird mit 5 V betrieben und gibt am Ausgang maximal ~3,4 V aus.
+Der ESP32-ADC verträgt aber nur **3,3 V**. Daher ist ein Spannungsteiler **Pflicht**
+für den Dauerbetrieb. Für erste Tests kann der Teiler weggelassen werden
+(Firmware-Flag `ACS712_HAS_DIVIDER 0` in `pins.h`).
+
+#### Anschluss ohne Spannungsteiler (Test)
+
 ```
 ACS712 VCC  ──── 5 V
 ACS712 GND  ──── GND
-ACS712 OUT  ──── ESP32 GPIO 34    (analog, Input-Only)
 ACS712 IP+  ──── Motor (+) Leitung
 ACS712 IP−  ──── Motor (−) Richtung Last
+
+ACS712 OUT ─────────────────────────── ESP32 GPIO 34
+```
+
+> ⚠️ Nur für kurze Tests! Bei vollem Motorstrom können kurzzeitig >3,3 V anliegen.
+> `ACS712_HAS_DIVIDER` in `pins.h` auf `0` lassen.
+
+---
+
+#### Anschluss mit Spannungsteiler 10 kΩ / 20 kΩ (Dauerbetrieb)
+
+Der Teiler reduziert den Spannungsbereich von 0–3,4 V auf 0–2,27 V
+und verschiebt den Arbeitspunkt in den lineareren ADC-Bereich des ESP32.
+
+```
+                         10 kΩ
+ACS712 OUT ──────┬────[10 kΩ]──── ESP32 GPIO 34
+                 │                       │
+               100 nF               20 kΩ
+                 │                       │
+                GND ───────────────────GND
+```
+
+**Schaltbild Einzelkanal (Draufsicht):**
+
+```
+ACS712                Spannungsteiler            ESP32
+┌──────────┐                                  ┌──────────┐
+│      OUT ├──────┬────[10 kΩ]────────────────┤ GPIO 34  │
+│          │      │                       │    │ (ADC)    │
+│      GND ├──┐ [100nF]               [20 kΩ] │          │
+│          │  │   │                       │    │      GND ├──┐
+│      VCC ├──┼───┘                       │    └──────────┘  │
+│          │  │   GND ───────────────────GND                 │
+│      IP+ ├──┼── Motor (+)                                  │
+│      IP− ├──┼── Motor (−) Richtung Last                    │
+└──────────┘  └────────────────────────────────────────────GND
+```
+
+**Stückliste Spannungsteiler:**
+
+| Bauteil | Wert | Hinweis |
+|---|---|---|
+| R1 | 10 kΩ | Reihenwiderstand (OUT → GPIO 34) |
+| R2 | 20 kΩ | Shuntwiderstand (GPIO 34 → GND) |
+| C1 | 100 nF | Keramik (MLCC), Rauschfilter (OUT → GND) |
+
+> 💡 **Warum genau 10 kΩ / 20 kΩ?**
+> Der Teilerfaktor ist 20/(10+20) = **0,667**.
+> Maximale Ausgangsspannung ACS712: 3,4 V × 0,667 = **2,27 V** → sicher unter 3,3 V.
+> Der 100 nF-Kondensator bildet mit dem Ausgangswiderstand des ACS712 (~4,7 kΩ)
+> einen Tiefpass mit Grenzfrequenz ~340 Hz – filtert ADC-Rauschen effektiv heraus.
+
+> ⚠️ Nach dem Einbau des Teilers `ACS712_HAS_DIVIDER` in `pins.h` auf `1` setzen!
+
+**Komplette Verbindungsliste (mit Teiler):**
+
+```
+ACS712 VCC  ──── 5 V
+ACS712 GND  ──── GND
+ACS712 IP+  ──── Motor (+) Leitung
+ACS712 IP−  ──── Motor (−) Richtung Last
+ACS712 OUT  ──── R1 (10 kΩ) ──── ESP32 GPIO 34
+                      │
+                 R2 (20 kΩ)
+                      │
+                     GND
+ACS712 OUT  ──── C1 (100 nF) ──── GND   ← Rauschfilter, parallel zu R2
 ```
 
 ---
