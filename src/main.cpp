@@ -1,7 +1,7 @@
 // ==========================
 // FIRMWARE VERSION
 // ==========================
-const char *FW_VERSION = "2.0.15";
+const char *FW_VERSION = "2.0.16";
 
 // ==========================
 // INCLUDES
