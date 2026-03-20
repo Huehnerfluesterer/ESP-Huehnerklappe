@@ -6,6 +6,7 @@
 #include "../lux.h"
 #include "../system.h"
 #include "../logger.h"
+#include "../bme.h"
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <RTClib.h>
@@ -37,6 +38,7 @@ void handleRoot()
 body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; }
 .header { padding:28px 20px 20px; text-align:center; font-size:20px; font-weight:700; }
 .datetime { font-size:15px; color:var(--muted); margin-top:6px; }
+.weather  { font-size:14px; color:var(--muted); margin-top:4px; letter-spacing:0.3px; }
 .container { max-width:430px; margin:auto; padding:10px 16px 110px; }
 .card { background:var(--card); border-radius:var(--radius); padding:18px; margin-bottom:16px; box-shadow:0 6px 18px rgba(0,0,0,0.06),0 2px 6px rgba(0,0,0,0.04); }
 .card-title { font-size:16px; font-weight:600; margin-bottom:14px; }
@@ -75,7 +77,7 @@ document.addEventListener('DOMContentLoaded',()=>{update();setInterval(update,30
 </script>
 </head>
 <body>
-<div class="header"><h3>🐔 Hühnerklappe</h3><div class="datetime"><span id="date">---</span> · <span id="time">--:--</span></div></div>
+<div class="header"><h3>🐔 Hühnerklappe</h3><div class="datetime"><span id="date">---</span> · <span id="time">--:--</span></div><div id="weather" class="weather" style="display:none;"></div></div>
 <div class="container">
   <div class="card">
     <div class="card-header">
@@ -112,6 +114,8 @@ async function update(){
     const r=await fetch('/status',{cache:'no-store'}); const d=await r.json();
     if(d.date!==last.date){document.getElementById('date').innerText=d.date;last.date=d.date;}
     if(d.time!==last.time){document.getElementById('time').innerText=d.time;last.time=d.time;}
+    const wEl=document.getElementById('weather');
+    if(wEl){if(d.bmeOk){wEl.textContent='🌡 '+d.bmeTemp+'°C  💧'+d.bmeHumidity+'%  🌬 '+d.bmePressure+' hPa';wEl.style.display='block';}else{wEl.style.display='none';}}
     if(d.door!==last.door){const el=document.getElementById('door');el.innerText=d.door;el.className="badge "+(d.door==="Offen"?"open":"closed");last.door=d.door;}
     const moving=(d.moving==="1"),isOpen=(d.door==="Offen");
     if(moving)      setDoorButton("Stopp","btn-stop");
@@ -178,6 +182,12 @@ void handleStatus()
     doc["fw"]            = FW_VERSION;
     doc["sysError"]      = systemError() ? "1" : "0";
     doc["rgbred"]     = rgbRedActive ? "An" : "Aus";
+    doc["bmeOk"]      = bmeOk;
+    if (bmeOk) {
+        doc["bmeTemp"]     = String(bmeTemp,     1);
+        doc["bmeHumidity"] = String(bmeHumidity, 1);
+        doc["bmePressure"] = String(bmePressure, 1);
+    }
 
     String out; serializeJson(doc, out);
     server.send(200, "application/json", out);

@@ -7,6 +7,13 @@
 // Warm-weiß: R=255 G=180 B=60  (über 3× IRLZ44N)
 // ==================================================
 
+// Konfigurierbare Lichtfarbe (über /rgb Seite)
+extern uint8_t rgbColorR;
+extern uint8_t rgbColorG;
+extern uint8_t rgbColorB;
+extern uint8_t rgbColorW;      // Warm-Weiß Kanal (RGBW)
+extern uint8_t rgbBrightness;
+
 extern LightState    lightState;
 extern unsigned long lightStateUntil;
 extern bool          lightActive;

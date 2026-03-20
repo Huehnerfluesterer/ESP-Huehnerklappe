@@ -47,6 +47,7 @@
 #define RGB_PIN_R       4    // war: WS2812_PIN
 #define RGB_PIN_G      16
 #define RGB_PIN_B      17
+#define RGB_PIN_W      23    // RGBW – Warm-Weiß Kanal (0 = nicht verbaut)
 #define RGB_FREQ     1000    // 1 kHz PWM
 #define RGB_BITS        8    // 8-Bit (0–255)
 

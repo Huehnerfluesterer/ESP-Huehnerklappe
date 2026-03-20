@@ -85,7 +85,11 @@ void handleButtonPress()
             learningOpenDone = true;
             addLog("Open-Position gespeichert: " + String(openPosition));
             learnStartTime = millis();
+            // Motor schließen mit langem Timeout (30s)
+            motorState = MOTOR_CLOSING;
             motorClose();
+            motorUntil = millis() + 30000UL;
+            addLog("Fahre Richtung CLOSE – Taster drücken wenn geschlossen");
         }
         else
         {
@@ -93,6 +97,9 @@ void handleButtonPress()
             saveMotorPositions();
             learningActive = false;
             motorStop();
+            motorState = MOTOR_STOPPED;
+            doorOpen = false;
+            saveDoorState();
             addLog("Close-Position gespeichert: " + String(closePosition));
             addLog("Einlernen abgeschlossen");
         }

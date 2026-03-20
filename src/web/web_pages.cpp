@@ -8,6 +8,8 @@
 #include "../logger.h"
 #include "../mqtt.h"
 #include "../pins.h"
+#include "../bme.h"
+#include "../relay.h"
 #include <WiFi.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -33,6 +35,8 @@ void handleAdvanced()
     <div class="card-title">Werkzeuge</div>
     <button onclick="location.href='/systemtest'" class="btn-open">🧪 Systemtest</button>
     <button onclick="location.href='/mqtt'"        class="btn-open">📡 MQTT Einstellungen</button>
+    <button onclick="location.href='/espnow'"      class="btn-open">📶 ESP-NOW Geräte</button>
+    <button onclick="location.href='/rgb'"         class="btn-open">🎨 Lichtfarbe & Helligkeit</button>
     <button onclick="location.href='/calibration'" class="btn-open">🎯 Kalibrierung</button>
     <button onclick="location.href='/blockade'"    class="btn-open">⚡ Blockadeerkennung</button>
     <button onclick="location.href='/log'"         class="btn-open">📜 Logbuch</button>
@@ -53,12 +57,250 @@ void handleAdvanced()
 </style>
 <script>
 function rebootESP(){ if(!confirm("ESP wirklich neu starten?")) return; fetch("/reset",{method:"POST"}); setTimeout(()=>location.href="/",4000); }
+function toggleTheme(){ fetch("/set-theme",{method:"POST",body:new URLSearchParams({theme:document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark"})}).then(()=>location.reload()); }
 </script>
 )rawliteral";
     html += renderFooter();
     html.replace("%FW_VERSION%", FW_VERSION);
     html.replace("%RSSI%",       String(WiFi.RSSI()));
     html.replace("%FREE_HEAP%",  String(ESP.getFreeHeap() / 1024));
+    server.send(200, "text/html; charset=UTF-8", html);
+}
+
+// ==================================================
+// ESP-NOW GERÄTE
+// ==================================================
+void handleEspNow()
+{
+    String html = renderThemeHead("ESP-NOW Geräte");
+
+    // Letztes Signal BME formatieren
+    String bmeLastSeen = "–";
+    String bmeMacStr   = "–";
+    if (bmeLastReceived > 0) {
+        unsigned long ago = (millis() - bmeLastReceived) / 1000;
+        if      (ago < 60)   bmeLastSeen = "vor " + String(ago) + " s";
+        else if (ago < 3600) bmeLastSeen = "vor " + String(ago/60) + " min";
+        else                 bmeLastSeen = "vor " + String(ago/3600) + " h";
+        char mac[18];
+        snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+            bmeLastSenderMac[0], bmeLastSenderMac[1], bmeLastSenderMac[2],
+            bmeLastSenderMac[3], bmeLastSenderMac[4], bmeLastSenderMac[5]);
+        bmeMacStr = String(mac);
+    }
+
+    html += R"rawliteral(
+<div class="header"><h3>📶 ESP-NOW Geräte</h3></div>
+<div class="container">
+
+  <!-- Eigene MAC -->
+  <div class="card">
+    <div class="card-title">Diese Klappe (Empfänger)</div>
+    <div class="status-row">
+      <span class="label">MAC-Adresse</span>
+      <code id="ownMac" style="font-size:14px;letter-spacing:1px;">…</code>
+    </div>
+    <div style="color:var(--muted);font-size:12px;margin-top:4px;">
+      Diese MAC in jeden Sender-Sketch als <code>RECEIVER_MAC</code> eintragen.
+    </div>
+  </div>
+
+  <!-- Geräteübersicht -->
+  <div class="card">
+    <div class="card-title">Verbundene Geräte</div>
+    <div class="device-row %BME_STATUS_CLASS%">
+      <div class="device-icon">🌡</div>
+      <div class="device-info">
+        <div class="device-name">BME280 Außensensor</div>
+        <div class="device-meta"><span id="bmeLastSeen">%BME_LAST_SEEN%</span> · <span id="bmeSenderMac">%BME_SENDER_MAC%</span></div>
+      </div>
+      <div id="bmeBadge" class="device-badge %BME_BADGE_CLASS%">%BME_BADGE_TEXT%</div>
+    </div>
+    <div class="device-row">
+      <div class="device-icon">🔌</div>
+      <div class="device-info">
+        <div class="device-name">Relais ESP32</div>
+        <div class="device-meta"><span id="relayLastSeen">%RELAY_LAST_SEEN%</span> · <span id="relayMacMeta">%RELAY_MAC_META%</span></div>
+      </div>
+      <div id="relayBadge" class="device-badge %RELAY_BADGE_CLASS%">%RELAY_BADGE_TEXT%</div>
+    </div>
+    <!-- Weitere Geräte hier ergänzen -->
+  </div>
+
+  <!-- BME280 Einstellungen -->
+  <div class="card">
+    <div class="card-title">🌡 BME280 Außensensor</div>
+    <div class="row-toggle">
+      <div>
+        <div style="font-size:15px;">ESP-NOW Empfang</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:2px;">Aus = I²C direkt · Ein = ESP-NOW</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="bmeEspNow" %BME_ESPNOW_CHECKED% onchange="saveBmeSource()">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="bmeInfo" style="display:%BME_INFO_DISPLAY%;margin-top:14px;background:var(--bg);border-radius:12px;padding:14px;font-size:13px;line-height:1.8;">
+      <strong>Einrichtung Sender-ESP32:</strong><br>
+      1. Sender-Sketch öffnen (<code>bme280_sender/</code>)<br>
+      2. WLAN-Zugangsdaten eintragen<br>
+      3. Flashen – keine MAC nötig, Klappe erkennt Sender automatisch
+    </div>
+  </div>
+
+  <!-- Relais ESP -->
+  <div class="card">
+    <div class="card-title">🔌 Relais ESP32</div>
+    <div class="row-toggle">
+      <div>
+        <div style="font-size:15px;">Relais aktivieren</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:2px;">Schaltet bei Automatik-Öffnung AN / Schließung AUS</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="relayEnabled" %RELAY_ENABLED_CHECKED% onchange="saveRelay()">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="relayConfig" style="display:%RELAY_CONFIG_DISPLAY%;margin-top:14px;">
+      <div style="margin-bottom:8px;font-size:13px;color:var(--muted);">MAC-Adresse des Relais-ESP32:</div>
+      <input type="text" id="relayMac" value="%RELAY_MAC_VALUE%"
+        placeholder="AA:BB:CC:DD:EE:FF"
+        style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;font-family:monospace;letter-spacing:1px;box-sizing:border-box;">
+      <button onclick="saveRelay()" style="margin-top:10px;width:100%;padding:10px;background:var(--green);color:#fff;border:none;border-radius:10px;font-size:14px;cursor:pointer;">Speichern</button>
+      <div id="relaySaveMsg" style="display:none;color:var(--green);font-size:13px;margin-top:8px;text-align:center;">✅ Gespeichert</div>
+      <div style="margin-top:14px;background:var(--bg2,var(--bg));border-radius:10px;padding:12px;font-size:12px;line-height:1.8;color:var(--muted);">
+        <strong>Einrichtung:</strong><br>
+        1. Relais-Sketch flashen (aus <code>relay_sender/</code>)<br>
+        2. Im seriellen Monitor angezeigte MAC hier eintragen<br>
+        3. Speichern – Relais schaltet bei nächster Automatik
+      </div>
+    </div>
+  </div>
+
+</div>
+<style>
+.status-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:15px;}
+.label{color:var(--muted);}
+.device-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);}
+.device-row:last-child{border-bottom:none;}
+.device-icon{font-size:24px;width:36px;text-align:center;}
+.device-info{flex:1;}
+.device-name{font-size:15px;font-weight:600;}
+.device-meta{font-size:12px;color:var(--muted);margin-top:2px;}
+.device-badge{padding:4px 12px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;}
+.badge-ok{background:rgba(34,197,94,0.15);color:var(--green);}
+.badge-warn{background:rgba(245,158,11,0.15);color:var(--orange);}
+.badge-off{background:rgba(107,114,128,0.15);color:var(--muted);}
+.row-toggle{display:flex;justify-content:space-between;align-items:center;}
+.toggle{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0;}
+.toggle input{opacity:0;width:0;height:0;}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--muted);border-radius:24px;transition:.3s;}
+.slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.3s;}
+input:checked+.slider{background:var(--green);}
+input:checked+.slider:before{transform:translateX(20px);}
+</style>
+<script>
+fetch("/bme-mac").then(r=>r.text()).then(t=>{
+  const parts=t.split("|");
+  document.getElementById("ownMac").textContent=parts[0]||t;
+});
+function refreshStatus(){
+  fetch("/espnow-status",{cache:"no-store"}).then(r=>r.json()).then(d=>{
+    // Badge
+    const badge=document.getElementById("bmeBadge");
+    if(badge){
+      if(!d.bmeEnabled){badge.className="device-badge badge-off";badge.textContent="Deaktiviert";}
+      else if(d.bmeOk) {badge.className="device-badge badge-ok"; badge.textContent="Online";}
+      else             {badge.className="device-badge badge-warn";badge.textContent="Kein Signal";}
+    }
+    // Meta
+    const ls=document.getElementById("bmeLastSeen");   if(ls) ls.textContent=d.bmeLastSeen;
+    const sm=document.getElementById("bmeSenderMac");  if(sm) sm.textContent=d.bmeSenderMac;
+    // Relais Badge
+    const rb=document.getElementById("relayBadge");
+    if(rb){
+      if(!d.relayEnabled)      {rb.className="device-badge badge-off"; rb.textContent="Deaktiviert";}
+      else if(!d.relayMac)     {rb.className="device-badge badge-warn";rb.textContent="Keine MAC";}
+      else if(d.relayOnline)   {rb.className="device-badge badge-ok";  rb.textContent="Online";}
+      else                     {rb.className="device-badge badge-warn";rb.textContent="Kein Signal";}
+    }
+    const rm=document.getElementById("relayMacMeta"); if(rm) rm.textContent=d.relayMac||"Keine MAC";
+    const rl=document.getElementById("relayLastSeen");if(rl) rl.textContent=d.relayLastSeen||"–";
+  }).catch(()=>{});
+}
+refreshStatus();
+setInterval(refreshStatus, 3000);
+function saveBmeSource(){
+  const src=document.getElementById("bmeEspNow").checked?"1":"0";
+  fetch("/save-bme-source",{method:"POST",body:new URLSearchParams({source:src})})
+    .then(()=>{
+      document.getElementById("bmeInfo").style.display=src==="1"?"block":"none";
+    });
+}
+function saveRelay(){
+  const enabled=document.getElementById("relayEnabled").checked?"1":"0";
+  const mac=document.getElementById("relayMac").value.trim();
+  fetch("/save-relay",{method:"POST",body:new URLSearchParams({enabled,mac})})
+    .then(()=>{
+      document.getElementById("relayConfig").style.display=enabled==="1"?"block":"none";
+      const msg=document.getElementById("relaySaveMsg");
+      msg.style.display="block";
+      setTimeout(()=>msg.style.display="none",2000);
+    });
+}
+</script>
+)rawliteral";
+
+    html += renderFooter();
+    // Eigene Werte ersetzen
+    bool bmeActive = (bmeSource == BME_SOURCE_ESPNOW);
+    String badgeClass, badgeText;
+    if (!bmeActive)               { badgeClass = "badge-off";  badgeText = "Deaktiviert"; }
+    else if (bmeOk)               { badgeClass = "badge-ok";   badgeText = "Online"; }
+    else                          { badgeClass = "badge-warn"; badgeText = "Kein Signal"; }
+
+    html.replace("%BME_ESPNOW_CHECKED%", bmeActive ? "checked" : "");
+    html.replace("%BME_INFO_DISPLAY%",   bmeActive ? "block" : "none");
+    html.replace("%BME_STATUS_CLASS%",   "");
+    html.replace("%BME_BADGE_CLASS%",    badgeClass);
+    html.replace("%BME_BADGE_TEXT%",     badgeText);
+    html.replace("%BME_LAST_SEEN%",      bmeLastSeen);
+    html.replace("%BME_SENDER_MAC%",     bmeMacStr);
+
+    // Relais-Platzhalter
+    String relayMacStr = "";
+    if (relayMacValid()) {
+        char rm[18];
+        snprintf(rm, sizeof(rm), "%02X:%02X:%02X:%02X:%02X:%02X",
+            relayMac[0], relayMac[1], relayMac[2],
+            relayMac[3], relayMac[4], relayMac[5]);
+        relayMacStr = String(rm);
+    }
+    String relayBadgeClass, relayBadgeText;
+    bool relayOnline = relayEnabled && relayMacValid() &&
+                       relayLastHeartbeat > 0 &&
+                       (millis() - relayLastHeartbeat < 90000UL);
+    if (!relayEnabled)       { relayBadgeClass = "badge-off";  relayBadgeText = "Deaktiviert"; }
+    else if (!relayMacValid()){ relayBadgeClass = "badge-warn"; relayBadgeText = "Keine MAC"; }
+    else if (relayOnline)    { relayBadgeClass = "badge-ok";   relayBadgeText = "Online"; }
+    else                     { relayBadgeClass = "badge-warn"; relayBadgeText = "Kein Signal"; }
+
+    String relayLastSeenStr = "–";
+    if (relayLastHeartbeat > 0) {
+        unsigned long ago = (millis() - relayLastHeartbeat) / 1000;
+        if      (ago < 60)   relayLastSeenStr = "vor " + String(ago) + " s";
+        else if (ago < 3600) relayLastSeenStr = "vor " + String(ago/60) + " min";
+        else                 relayLastSeenStr = "vor " + String(ago/3600) + " h";
+    }
+
+    html.replace("%RELAY_ENABLED_CHECKED%", relayEnabled ? "checked" : "");
+    html.replace("%RELAY_CONFIG_DISPLAY%",  relayEnabled ? "block" : "none");
+    html.replace("%RELAY_MAC_VALUE%",       relayMacStr);
+    html.replace("%RELAY_MAC_META%",        relayMacStr.isEmpty() ? "Keine MAC" : relayMacStr);
+    html.replace("%RELAY_LAST_SEEN%",       relayLastSeenStr);
+    html.replace("%RELAY_BADGE_CLASS%",     relayBadgeClass);
+    html.replace("%RELAY_BADGE_TEXT%",      relayBadgeText);
+
     server.send(200, "text/html; charset=UTF-8", html);
 }
 
@@ -295,6 +537,7 @@ void handleSelftest()
     <div class="card-title">Sensoren</div>
     <div class="status-row"><span class="label">Lichtsensor</span> <span id="luxStatus">–</span></div>
     <div class="status-row"><span class="label">RTC (DS3231)</span><span id="rtcStatus">–</span></div>
+    <div class="status-row"><span class="label">BME280</span>      <span id="bmeStatus">–</span></div>
     <div class="status-row"><span class="label">Türposition</span> <span>%DOOR_STATE%</span></div>
   </div>
   <div class="card">
@@ -318,8 +561,9 @@ function evaluateRSSI(){const r=parseInt("%RSSI%"),el=document.getElementById("r
 function evaluateMQTT(){const el=document.getElementById("mqttStatus"),s="%MQTT_STATUS%";if(!el)return;setClass(el,s==="Verbunden"?"ok":s==="Deaktiviert"?"warn":"error");}
 function evaluateRTC(ok,text){const el=document.getElementById("rtcStatus");if(!el)return;el.textContent=text||(ok?"OK":"Nicht gefunden");setClass(el,ok?"ok":"error");}
 function setLuxStatus(isOk,value){const el=document.getElementById("luxStatus");if(!el)return;if(!isOk||!Number.isFinite(value)||value<0){el.textContent="Nicht gefunden / Fehler";setClass(el,"error");}else{el.textContent=value.toFixed(1)+" lx";setClass(el,"ok");}}
+function setBmeStatus(isOk,t,h,p){const el=document.getElementById("bmeStatus");if(!el)return;if(!isOk){el.textContent="n/a (kein Sensor)";setClass(el,"warn");}else{el.textContent=t+"°C · "+h+"% · "+p+" hPa";setClass(el,"ok");}}
 evaluateHeap();evaluateRSSI();evaluateMQTT();
-fetch("/systemtest-status",{cache:"no-store"}).then(r=>r.json()).then(d=>{evaluateRTC(d.rtcOk===1||d.rtcOk===true,d.rtcStatus);setLuxStatus(!!d.bhOk,Number(d.lux));}).catch(()=>{});
+fetch("/systemtest-status",{cache:"no-store"}).then(r=>r.json()).then(d=>{evaluateRTC(d.rtcOk===1||d.rtcOk===true,d.rtcStatus);setLuxStatus(!!d.bhOk,Number(d.lux));setBmeStatus(!!d.bmeOk,d.bmeTemp,d.bmeHumidity,d.bmePressure);}).catch(()=>{});
 </script>
 )rawliteral";
     html += renderFooter();
@@ -478,7 +722,7 @@ void handleLearn()
     learningOpenDone = false;
     learnStartTime   = millis();
     motorReason      = "Einlernen";
-    startMotorOpen(20000);
+    startMotorOpen(30000);  // 30s Timeout – Taster drücken wenn oben
     addLog("Einlernen gestartet – fahre Richtung OPEN");
     server.send(200, "text/plain", "Learning started");
 }
@@ -514,6 +758,7 @@ void handleLogbook()
     <div class="card-title">Ereignisse</div>
     <div id="logContainer" class="log-container">%LOG_ENTRIES%</div>
     <button class="btn-close" onclick="clearLog()">🗑 Log löschen</button>
+    <button class="btn-close" onclick="location.href='/log/download'" style="background:var(--blue,#3b82f6);margin-top:8px;">⬇️ Log herunterladen</button>
   </div>
 </div>
 <style>
@@ -529,5 +774,173 @@ function clearLog(){ fetch("/log/clear",{method:"POST"}).then(()=>location.reloa
 )rawliteral";
     html += renderFooter();
     html.replace("%LOG_ENTRIES%", buildLogHTML());
+    server.send(200, "text/html; charset=UTF-8", html);
+}
+
+// ==================================================
+// RGB FARBE & HELLIGKEIT
+// ==================================================
+void handleRgb()
+{
+    String html = renderThemeHead("Lichtfarbe");
+    html += R"rawliteral(
+<div class="header"><h3>🎨 Lichtfarbe & Helligkeit</h3></div>
+<div class="container">
+  <div class="card">
+    <div class="card-title">Locklicht Farbe</div>
+
+    <!-- Vorschau -->
+    <div id="preview" style="width:100%;height:60px;border-radius:12px;margin-bottom:18px;
+      background:rgb(%PREV_R%,%PREV_G%,%PREV_B%);transition:background .2s;
+      border:1px solid var(--border);"></div>
+
+    <!-- Colorpicker -->
+    <div class="form-row">
+      <label>Farbe wählen</label>
+      <input type="color" id="colorPicker" value="%HEX_COLOR%"
+        style="width:100%;height:44px;border:none;border-radius:10px;cursor:pointer;background:none;"
+        oninput="onColorPick()">
+    </div>
+
+    <!-- Manuelle RGB Eingabe -->
+    <div style="display:flex;gap:10px;margin-bottom:14px;">
+      <div style="flex:1;">
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">R</label>
+        <input type="number" id="rVal" min="0" max="255" value="%R%"
+          style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);
+          border-radius:8px;color:var(--text);font-size:14px;" oninput="onRgbInput()">
+      </div>
+      <div style="flex:1;">
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">G</label>
+        <input type="number" id="gVal" min="0" max="255" value="%G%"
+          style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);
+          border-radius:8px;color:var(--text);font-size:14px;" oninput="onRgbInput()">
+      </div>
+      <div style="flex:1;">
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">B</label>
+        <input type="number" id="bVal" min="0" max="255" value="%B%"
+          style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);
+          border-radius:8px;color:var(--text);font-size:14px;" oninput="onRgbInput()">
+      </div>
+      <div style="flex:1;">
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">W</label>
+        <input type="number" id="wVal" min="0" max="255" value="%W%"
+          style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);
+          border-radius:8px;color:var(--text);font-size:14px;" oninput="onRgbInput()">
+      </div>
+    </div>
+
+    <!-- Helligkeit -->
+    <div class="form-row">
+      <label style="display:flex;justify-content:space-between;">
+        <span>Helligkeit</span>
+        <span id="brLabel">%BR_PCT%%</span>
+      </label>
+      <input type="range" id="brightness" min="1" max="255" value="%BR%"
+        style="width:100%;accent-color:var(--green);margin-top:6px;"
+        oninput="onBrInput()">
+    </div>
+
+    <!-- Schnellfarben -->
+    <div style="margin-top:6px;margin-bottom:16px;">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Schnellfarben</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button onclick="setColor(255,197,143)" style="width:36px;height:36px;border-radius:8px;border:none;cursor:pointer;background:rgb(255,197,143);" title="Warm-Weiß 2700K"></button>
+        <button onclick="setColor(255,255,220)" style="width:36px;height:36px;border-radius:8px;border:none;cursor:pointer;background:rgb(255,255,220);" title="Kalt-Weiß 5000K"></button>
+        <button onclick="setColor(255,80,0)"    style="width:36px;height:36px;border-radius:8px;border:none;cursor:pointer;background:rgb(255,80,0);"   title="Orange"></button>
+        <button onclick="setColor(255,0,0)"     style="width:36px;height:36px;border-radius:8px;border:none;cursor:pointer;background:rgb(255,0,0);"     title="Rot"></button>
+        <button onclick="setColor(0,255,0)"     style="width:36px;height:36px;border-radius:8px;border:none;cursor:pointer;background:rgb(0,255,0);"     title="Grün"></button>
+        <button onclick="setColor(0,80,255)"    style="width:36px;height:36px;border-radius:8px;border:none;cursor:pointer;background:rgb(0,80,255);"    title="Blau"></button>
+      </div>
+    </div>
+
+    <button onclick="saveRgb()" style="width:100%;padding:12px;background:var(--green);
+      color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;">
+      💾 Speichern
+    </button>
+    <div id="saveMsg" style="display:none;color:var(--green);font-size:13px;
+      text-align:center;margin-top:10px;">✅ Gespeichert – aktiv beim nächsten Locklicht</div>
+
+    <div style="margin-top:14px;padding:12px;background:var(--bg);border-radius:10px;
+      font-size:12px;color:var(--muted);line-height:1.7;">
+      💡 Die Farbe gilt für das <strong>Locklicht</strong> (vor Öffnung/Schließung).<br>
+      Der Rot-Testmodus bleibt immer rot.
+    </div>
+  </div>
+</div>
+<style>
+.form-row{margin-bottom:14px;}
+.form-row label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;}
+.form-row input[type=text],.form-row input[type=number]{
+  width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);
+  border-radius:10px;color:var(--text);font-size:14px;}
+</style>
+<script>
+function toHex(v){return v.toString(16).padStart(2,'0');}
+function fromHex(h){return parseInt(h,16);}
+function clamp(v){return Math.max(0,Math.min(255,parseInt(v)||0));}
+
+function updatePreview(){
+  const r=clamp(document.getElementById('rVal').value);
+  const g=clamp(document.getElementById('gVal').value);
+  const b=clamp(document.getElementById('bVal').value);
+  document.getElementById('preview').style.background=`rgb(${r},${g},${b})`;
+  document.getElementById('colorPicker').value='#'+toHex(r)+toHex(g)+toHex(b);
+}
+function onColorPick(){
+  const hex=document.getElementById('colorPicker').value;
+  document.getElementById('rVal').value=fromHex(hex.slice(1,3));
+  document.getElementById('gVal').value=fromHex(hex.slice(3,5));
+  document.getElementById('bVal').value=fromHex(hex.slice(5,7));
+  updatePreview();
+}
+function onRgbInput(){updatePreview();}
+function onBrInput(){
+  const v=document.getElementById('brightness').value;
+  document.getElementById('brLabel').textContent=Math.round(v/255*100)+'%';
+}
+function setColor(r,g,b,w=0){
+  document.getElementById('rVal').value=r;
+  document.getElementById('gVal').value=g;
+  document.getElementById('bVal').value=b;
+  document.getElementById('wVal').value=w;
+  updatePreview();
+}
+function saveRgb(){
+  const r=clamp(document.getElementById('rVal').value);
+  const g=clamp(document.getElementById('gVal').value);
+  const b=clamp(document.getElementById('bVal').value);
+  const br=document.getElementById('brightness').value;
+  const w=clamp(document.getElementById('wVal').value);
+  fetch('/save-rgb',{method:'POST',body:new URLSearchParams({r,g,b,w,br})})
+    .then(()=>{
+      const m=document.getElementById('saveMsg');
+      m.style.display='block';
+      setTimeout(()=>m.style.display='none',3000);
+    });
+}
+// Helligkeit Label initial setzen
+document.getElementById('brLabel').textContent=
+  Math.round(document.getElementById('brightness').value/255*100)+'%';
+</script>
+)rawliteral";
+
+    html += renderFooter();
+
+    // Hex-Farbe berechnen
+    char hex[8];
+    snprintf(hex, sizeof(hex), "#%02x%02x%02x", rgbColorR, rgbColorG, rgbColorB);
+
+    html.replace("%R%",       String(rgbColorR));
+    html.replace("%W%",       String(rgbColorW));
+    html.replace("%G%",       String(rgbColorG));
+    html.replace("%B%",       String(rgbColorB));
+    html.replace("%BR%",      String(rgbBrightness));
+    html.replace("%BR_PCT%",  String((int)(rgbBrightness / 2.55f)));
+    html.replace("%HEX_COLOR%", String(hex));
+    html.replace("%PREV_R%",  String(rgbColorR));
+    html.replace("%PREV_G%",  String(rgbColorG));
+    html.replace("%PREV_B%",  String(rgbColorB));
+
     server.send(200, "text/html; charset=UTF-8", html);
 }

@@ -1,5 +1,6 @@
 #include "wlan.h"
 #include "logger.h"
+#include "bme.h"
 #include <WiFi.h>
 #include <Arduino.h>
 #include "config.h"
@@ -26,10 +27,14 @@ void wifiConnectNonBlocking()
 static void wifiHardResetStack()
 {
     addLog("♻️ WLAN-Stack Neustart");
+    // ESP-NOW zuerst beenden – sonst hängt esp_now_deinit nach WiFi.mode(OFF)
+    if (bmeSource == BME_SOURCE_ESPNOW) bmeSetSource(BME_SOURCE_ESPNOW); // stoppt + merkt Modus
     WiFi.disconnect(true, true);
     WiFi.mode(WIFI_OFF);
     delay(100);
     wifiConnectNonBlocking();
+    // ESP-NOW nach WiFi-Neustart wieder aktivieren
+    if (bmeSource == BME_SOURCE_ESPNOW) bmeSetSource(BME_SOURCE_ESPNOW);
 }
 
 void wifiWatchdog()

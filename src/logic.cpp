@@ -5,6 +5,7 @@
 #include "lux.h"
 #include "storage.h"
 #include "logger.h"
+#include "relay.h"
 #include <math.h>
 
 // ==================================================
@@ -197,6 +198,7 @@ void runAutomatik(const DateTime &now, int nowMin, unsigned long nowMs,
                 lightAboveSince   = 0;
                 openInterruptionSince = 0;
                 addLog("Öffnung gestartet (Schwellen-Erfüllung)");
+                relaySendOn();
             }
         }
         else if (lux < openLightThreshold - OPEN_HYSTERESIS_LX)
@@ -222,6 +224,7 @@ void runAutomatik(const DateTime &now, int nowMin, unsigned long nowMs,
                 lastOpenActionMin   = nowMin;
                 preLightCloseDone   = false;
                 preLightOpenDone    = false;
+                relaySendOn();
             }
         }
     }
@@ -240,6 +243,7 @@ void runAutomatik(const DateTime &now, int nowMin, unsigned long nowMs,
                 lastCloseActionMin = nowMin;
                 addLog("Schließvorgang gestartet (" + motorReason + ")");
                 preLightOpenDone = false;
+                relaySendOff();
             }
         }
     }
@@ -342,6 +346,7 @@ void runAutomatik(const DateTime &now, int nowMin, unsigned long nowMs,
             closeInterruptionSince = 0;
             scheduledCloseAt    = 0;
             addLog("Schließvorgang gestartet (Schwellen-Erfüllung)");
+            relaySendOff();
         }
     }
     else if (lux > closeRiseThreshold)

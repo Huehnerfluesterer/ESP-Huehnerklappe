@@ -63,8 +63,10 @@ bool luxInit()
     hasVEML = veml.begin();
     if (hasVEML)
     {
-        veml.setGain(VEML7700_GAIN_1_8);
-        veml.setIntegrationTime(VEML7700_IT_25MS);
+        veml.setGain(VEML7700_GAIN_2);        // höhere Empfindlichkeit für schwaches Licht
+        veml.setIntegrationTime(VEML7700_IT_100MS);
+        vemlGain = VEML7700_GAIN_2;
+        vemlIT   = VEML7700_IT_100MS;
         Serial.println("✅ VEML7700 initialisiert");
     }
     else
@@ -193,10 +195,10 @@ void reinitVEML7700()
 
     if (veml.begin())
     {
-        veml.setGain(VEML7700_GAIN_1_8);
-        veml.setIntegrationTime(VEML7700_IT_25MS);
-        vemlGain = VEML7700_GAIN_1_8;
-        vemlIT   = VEML7700_IT_25MS;
+        veml.setGain(VEML7700_GAIN_2);
+        veml.setIntegrationTime(VEML7700_IT_100MS);
+        vemlGain = VEML7700_GAIN_2;
+        vemlIT   = VEML7700_IT_100MS;
 
         hasVEML     = true;
         luxFailCount = 0;

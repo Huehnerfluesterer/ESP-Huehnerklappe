@@ -1,7 +1,7 @@
 // ==========================
 // FIRMWARE VERSION
 // ==========================
-const char *FW_VERSION = "1.0.15";
+const char *FW_VERSION = "2.0.15";
 
 // ==========================
 // INCLUDES
@@ -14,6 +14,7 @@ const char *FW_VERSION = "1.0.15";
 #include <EEPROM.h>
 #include <Update.h>
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 // esp_task_wdt nicht manuell verwenden – Arduino-Framework übernimmt das
 #include <PubSubClient.h>
 
@@ -29,6 +30,9 @@ const char *FW_VERSION = "1.0.15";
 #include "logic.h"
 #include "mqtt.h"
 #include "wlan.h"
+#include "bme.h"
+#include "relay.h"
+#include "espnow_dispatch.h"
 #include "web/web.h"
 #include "icons.h"       // icon192_png / icon512_png PROGMEM-Arrays
 
@@ -60,6 +64,7 @@ void setup()
     Serial.println("\n🐔 Hühnerklappe – FW " + String(FW_VERSION));
 
     // ===== EEPROM (muss zuerst) =====
+    loggerInit();   // LittleFS mounten + alte Logs laden (vor storageInit!)
     storageInit();
 
     // ===== EINSTELLUNGEN LADEN =====
@@ -70,6 +75,9 @@ void setup()
     loadTheme();
     loadLimitSwitchSetting();
     loadBlockadeSettings();
+    loadBmeSource();
+    loadRelaySettings();
+    loadRgbSettings();
 
     // ===== GPIO =====
     pinMode(MOTOR_IN1,          OUTPUT); digitalWrite(MOTOR_IN1, LOW);
@@ -93,11 +101,29 @@ void setup()
     rtcOk = rtc.begin();
     if (!rtcOk) Serial.println("⚠️ RTC DS3231 nicht gefunden");
     luxInit();
+    // bmeInit() nach WiFi – ESP-NOW benötigt initialisierten WiFi-Stack
 
     // ===== WIFI + NTP =====
     WiFi.mode(WIFI_STA);
     WiFi.setHostname("Huehnerklappe-ESP32");
     wifiConnectNonBlocking();
+
+    // Warten bis WiFi verbunden – ESP-NOW braucht den korrekten Kanal
+    // Max 10s warten, dann trotzdem weitermachen
+    {
+        unsigned long t0 = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) {
+            delay(100);
+        }
+        if (WiFi.status() == WL_CONNECTED)
+            Serial.printf("✅ WLAN verbunden – Kanal %d\n", WiFi.channel());
+        else
+            Serial.println("⚠️ WLAN noch nicht verbunden – ESP-NOW Kanal evtl. falsch");
+    }
+
+    bmeInit();    // nach WiFi verbunden – ESP-NOW braucht korrekten Kanal
+    relayInit();  // nach bmeInit() – nutzt ggf. denselben ESP-NOW Stack
+    espnowDispatcherInit();  // einziger recv_cb – leitet an bme/relay weiter
 
     configTzTime("CET-1CEST,M3.5.0/2,M10.5.0/3", "pool.ntp.org", "time.nist.gov");
     {
@@ -128,6 +154,18 @@ void setup()
     server.on("/save-open",  HTTP_POST, handleSaveOpen);
     server.on("/save-close", HTTP_POST, handleSaveClose);
     server.on("/advanced",   HTTP_GET,  handleAdvanced);
+    server.on("/espnow",     HTTP_GET,  handleEspNow);
+    server.on("/rgb",        HTTP_GET,  handleRgb);
+    server.on("/save-rgb",   HTTP_POST, []() {
+        rgbColorR    = (uint8_t)constrain(server.arg("r").toInt(),  0, 255);
+        rgbColorG    = (uint8_t)constrain(server.arg("g").toInt(),  0, 255);
+        rgbColorB    = (uint8_t)constrain(server.arg("b").toInt(),  0, 255);
+        rgbColorW    = (uint8_t)constrain(server.arg("w").toInt(),  0, 255);
+        rgbBrightness= (uint8_t)constrain(server.arg("br").toInt(), 1, 255);
+        saveRgbSettings();
+        server.send(200, "text/plain", "OK");
+    });
+    server.on("/fw",         HTTP_GET,  handleFw);
     server.on("/blockade",   HTTP_GET,  handleBlockade);
     server.on("/save-blockade", HTTP_POST, []() {
         if (otaInProgress || ioSafeState) { server.send(503, "text/plain", "OTA aktiv"); return; }
@@ -175,7 +213,80 @@ void setup()
         peakCurrentA = 0.0f;
         server.send(200, "text/plain", "OK");
     });
-    server.on("/fw",         HTTP_GET,  handleFw);
+    server.on("/save-bme-source", HTTP_POST, []() {
+        BmeSource newSrc = (server.arg("source") == "1") ? BME_SOURCE_ESPNOW : BME_SOURCE_LOCAL;
+        bmeSetSource(newSrc);
+        saveBmeSource();
+        server.send(200, "text/plain", "OK");
+    });
+
+    server.on("/save-relay", HTTP_POST, []() {
+        relayEnabled = (server.arg("enabled") == "1");
+        // MAC parsen: "AA:BB:CC:DD:EE:FF"
+        String mac = server.arg("mac");
+        if (mac.length() == 17) {
+            for (int i = 0; i < 6; i++)
+                relayMac[i] = strtoul(mac.substring(i*3, i*3+2).c_str(), nullptr, 16);
+        }
+        saveRelaySettings();
+        relayReset();
+        server.send(200, "text/plain", "OK");
+    });
+
+    server.on("/bme-mac", HTTP_GET, []() {
+        String info = WiFi.macAddress() + "|" + String(WiFi.channel());
+        server.send(200, "text/plain", info);
+    });
+    server.on("/espnow-status", HTTP_GET, []() {
+        JsonDocument doc;
+        // BME280
+        doc["bmeEnabled"]  = (bmeSource == BME_SOURCE_ESPNOW);
+        doc["bmeOk"]       = bmeOk;
+        if (bmeLastReceived > 0) {
+            unsigned long ago = (millis() - bmeLastReceived) / 1000;
+            String s;
+            if      (ago < 60)   s = "vor " + String(ago) + " s";
+            else if (ago < 3600) s = "vor " + String(ago/60) + " min";
+            else                 s = "vor " + String(ago/3600) + " h";
+            doc["bmeLastSeen"] = s;
+            char mac[18];
+            snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                bmeLastSenderMac[0], bmeLastSenderMac[1], bmeLastSenderMac[2],
+                bmeLastSenderMac[3], bmeLastSenderMac[4], bmeLastSenderMac[5]);
+            doc["bmeSenderMac"] = mac;
+        } else {
+            doc["bmeLastSeen"]  = "–";
+            doc["bmeSenderMac"] = "–";
+        }
+        // Relais
+        doc["relayEnabled"] = relayEnabled;
+        if (relayMacValid()) {
+            char rmac[18];
+            snprintf(rmac, sizeof(rmac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                relayMac[0], relayMac[1], relayMac[2],
+                relayMac[3], relayMac[4], relayMac[5]);
+            doc["relayMac"] = rmac;
+        } else {
+            doc["relayMac"] = "";
+        }
+        // Online wenn Heartbeat innerhalb der letzten 90s
+        bool relayOnline = relayEnabled && relayMacValid() &&
+                           relayLastHeartbeat > 0 &&
+                           (millis() - relayLastHeartbeat < 90000UL);
+        doc["relayOnline"] = relayOnline;
+        if (relayLastHeartbeat > 0) {
+            unsigned long ago = (millis() - relayLastHeartbeat) / 1000;
+            String s;
+            if      (ago < 60)   s = "vor " + String(ago) + " s";
+            else if (ago < 3600) s = "vor " + String(ago/60) + " min";
+            else                 s = "vor " + String(ago/3600) + " h";
+            doc["relayLastSeen"] = s;
+        } else {
+            doc["relayLastSeen"] = "–";
+        }
+        String out; serializeJson(doc, out);
+        server.send(200, "application/json", out);
+    });
     server.on("/systemtest", HTTP_GET,  handleSelftest);
     server.on("/mqtt",       HTTP_GET,  handleMqtt);
     server.on("/save-mqtt",  HTTP_POST, handleSaveMqtt);
@@ -191,6 +302,16 @@ void setup()
         if (otaInProgress || ioSafeState) { server.send(503, "text/plain", "OTA aktiv"); return; }
         clearLogbook(); addLog("Logbuch manuell gelöscht");
         server.send(200, "text/plain", "OK");
+    });
+
+    server.on("/log/download", HTTP_GET, []() {
+        if (!LittleFS.exists(LOG_FILE)) {
+            server.send(404, "text/plain", "Kein Logfile vorhanden");
+            return;
+        }
+        File f = LittleFS.open(LOG_FILE, "r");
+        server.streamFile(f, "text/plain");
+        f.close();
     });
 
     server.on("/set-theme", HTTP_POST, []() {
@@ -295,6 +416,10 @@ void setup()
         doc["bhOk"]           = (hasVEML && !vemlHardError);
         doc["rtcOk"]          = rtcOk ? 1 : 0;
         doc["rtcStatus"]      = rtcOk ? "OK" : "Nicht gefunden / nicht initialisiert";
+        doc["bmeOk"]          = bmeOk;
+        doc["bmeTemp"]        = bmeOk ? String(bmeTemp,     1) : "n/a";
+        doc["bmeHumidity"]    = bmeOk ? String(bmeHumidity, 1) : "n/a";
+        doc["bmePressure"]    = bmeOk ? String(bmePressure, 1) : "n/a";
         doc["heap"]           = ESP.getFreeHeap();
         doc["uptime"]         = millis() / 1000;
         doc["useLimitSwitches"] = useLimitSwitches;
@@ -480,6 +605,10 @@ void loop()
 
     // ===== SYSTEM-HEALTH =====
     updateSystemHealth();
+
+    // ===== BME280 =====
+    bmeUpdate();
+    relaySync();
 
     // ===== DIMMING + STALLLICHT =====
     updateDimming(nowMs);

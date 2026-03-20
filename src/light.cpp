@@ -25,11 +25,14 @@ unsigned long dimEndTime        = 0;
 static const int chR = 0;
 static const int chG = 1;
 static const int chB = 2;
+static const int chW = 5;  // W-Kanal (RGBWW) – Kanal 5, Motor=3, RGB=0-2
 
-// Warm-weiß Farbwerte
-static const uint8_t WW_R = 255;
-static const uint8_t WW_G = 180;
-static const uint8_t WW_B =  60;
+// Konfigurierbare Lichtfarbe (änderbar über Web-UI /rgb)
+uint8_t rgbColorR      = 255;
+uint8_t rgbColorG      = 197;
+uint8_t rgbColorB      = 143;
+uint8_t rgbColorW      =   0;  // W-Kanal default aus
+uint8_t rgbBrightness  = 255;
 
 // ==================================================
 // INITIALISIERUNG
@@ -40,33 +43,35 @@ void lightInit()
     ledcSetup(chR, RGB_FREQ, RGB_BITS);
     ledcSetup(chG, RGB_FREQ, RGB_BITS);
     ledcSetup(chB, RGB_FREQ, RGB_BITS);
+    ledcSetup(chW, RGB_FREQ, RGB_BITS);
     ledcAttachPin(RGB_PIN_R, chR);
     ledcAttachPin(RGB_PIN_G, chG);
     ledcAttachPin(RGB_PIN_B, chB);
-    Serial.printf("✅ RGB LEDC R=%d G=%d B=%d\n", chR, chG, chB);
+    ledcAttachPin(RGB_PIN_W, chW);
+    Serial.printf("✅ RGBW LEDC R=%d G=%d B=%d W=%d\n", chR, chG, chB, chW);
 
     // Sicher aus beim Start
-    ledcWrite(chR, 0); ledcWrite(chG, 0); ledcWrite(chB, 0);
+    ledcWrite(chR, 0); ledcWrite(chG, 0); ledcWrite(chB, 0); ledcWrite(chW, 0);
 }
 
 // ==================================================
 // INTERNE HELFER
 // ==================================================
-static void rgbSet(uint8_t r, uint8_t g, uint8_t b)
+static void rgbSet(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0)
 {
-    if (chR < 0) return;
     ledcWrite(chR, r);
     ledcWrite(chG, g);
     ledcWrite(chB, b);
+    ledcWrite(chW, w);
 }
 
-static void rgbSetScaled(uint8_t r, uint8_t g, uint8_t b, uint8_t brightness)
+static void rgbSetScaled(uint8_t r, uint8_t g, uint8_t b, uint8_t brightness, uint8_t w = 0)
 {
-    // brightness 0–255 skaliert alle Kanäle
     rgbSet(
         (uint16_t)r * brightness / 255,
         (uint16_t)g * brightness / 255,
-        (uint16_t)b * brightness / 255
+        (uint16_t)b * brightness / 255,
+        (uint16_t)w * brightness / 255
     );
 }
 
@@ -81,7 +86,7 @@ static void rgbOff()
 void lightOn()
 {
     digitalWrite(RELAIS_PIN, RELAY_ON);
-    rgbSet(WW_R, WW_G, WW_B);
+    rgbSetScaled(rgbColorR, rgbColorG, rgbColorB, rgbBrightness, rgbColorW);
     Serial.println("💡 LICHT EIN");
 }
 
@@ -190,7 +195,7 @@ void updateDimming(unsigned long nowMs)
         float    progress   = float(nowMs - dimStartTime) / float(dimEndTime - dimStartTime);
         progress            = constrain(progress, 0.0f, 1.0f);
         uint8_t  brightness = (uint8_t)constrain(int(255 * (1.0f - progress)), 0, 255);
-        rgbSetScaled(WW_R, WW_G, WW_B, brightness);
+        rgbSetScaled(rgbColorR, rgbColorG, rgbColorB, (uint8_t)((uint16_t)brightness * rgbBrightness / 255), (uint8_t)((uint16_t)rgbColorW * brightness / 255));
     }
     if (nowMs > dimEndTime) dimmingActive = false;
 }
